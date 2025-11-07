@@ -1,0 +1,197 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  passwordHash String
+  displayName  String?
+  avatarUrl    String?
+  role         UserRole  @default(USER)
+  preferences  Json?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  videos       Video[]
+  collections  Collection[]
+  comments     Comment[]
+  likes        Like[]
+  watchHistory WatchHistory[]
+  favorites    FavoriteCollection[]
+  notifications Notification[]
+  videoEvents  VideoEvent[]
+
+  @@map("users")
+}
+
+model Video {
+  id               String   @id @default(uuid())
+  ownerId          String
+  megaFileId       String?
+  megaFileUrl      String?
+  urlStream        String?
+  urlDownload      String?
+  title            String
+  description      String?
+  tags             String[]
+  thumbnailUrl     String?
+  durationSeconds  Int
+  viewsCount       Int      @default(0)
+  likesCount       Int      @default(0)
+  isPublished      Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  metadata         Json?
+
+  owner      User              @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  collections CollectionVideo[]
+  comments    Comment[]
+  likes       Like[]
+  history     WatchHistory[]
+  events      VideoEvent[]
+
+  @@map("videos")
+}
+
+model Collection {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  thumbnailUrl String?
+  createdById String
+  isFeatured  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdBy User              @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  videos    CollectionVideo[]
+  favorites FavoriteCollection[]
+
+  @@map("collections")
+}
+
+model CollectionVideo {
+  id           String   @id @default(uuid())
+  collectionId String
+  videoId      String
+  position     Int      @default(0)
+  addedAt      DateTime @default(now())
+
+  collection Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  video      Video      @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  @@unique([collectionId, videoId])
+  @@map("collection_videos")
+}
+
+model FavoriteCollection {
+  id           String   @id @default(uuid())
+  userId       String
+  collectionId String
+  createdAt    DateTime @default(now())
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  collection Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, collectionId])
+  @@map("favorites_collections")
+}
+
+model Comment {
+  id               String   @id @default(uuid())
+  videoId          String
+  userId           String
+  parentCommentId  String?
+  body             String
+  likesCount       Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  video      Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent     Comment? @relation("CommentReplies", fields: [parentCommentId], references: [id])
+  replies    Comment[] @relation("CommentReplies")
+
+  @@map("comments")
+}
+
+model VideoEvent {
+  id             String       @id @default(uuid())
+  videoId        String
+  userId         String?
+  eventType      VideoEventType
+  positionSeconds Float
+  sessionId      String
+  timestamp      DateTime     @default(now())
+
+  video Video @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  user  User?  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("video_events")
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  type      NotificationType
+  payload   Json
+  seen      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+model Like {
+  id        String   @id @default(uuid())
+  userId    String
+  videoId   String
+  createdAt DateTime @default(now())
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  video Video @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, videoId])
+  @@map("likes")
+}
+
+model WatchHistory {
+  id             String   @id @default(uuid())
+  userId         String
+  videoId        String
+  lastPosition   Float    @default(0)
+  watchedAt      DateTime @default(now())
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  video Video @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, videoId])
+  @@map("watch_history")
+}
+
+enum UserRole {
+  USER
+  EDITOR
+  ADMIN
+}
+
+enum VideoEventType {
+  PLAY
+  PAUSE
+  SEEK
+  TIMEUPDATE
+  ENDED
+}
+
+enum NotificationType {
+  REPLY
+  NEW_VIDEO
+  SYSTEM
+}
