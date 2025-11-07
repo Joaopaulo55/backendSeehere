@@ -3,7 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
-import { createClient } from 'redis';
+
 
 // Import routes
 import authRoutes from './routes/auth.js';
@@ -17,13 +17,7 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Redis client
-export const redisClient = createClient({
-  url: process.env.REDIS_URL || 'redis://localhost:6379'
-});
 
-redisClient.on('error', (err) => console.log('Redis Client Error', err));
-await redisClient.connect();
 
 // Rate limiting
 const limiter = rateLimit({

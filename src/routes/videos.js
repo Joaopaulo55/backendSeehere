@@ -1,7 +1,7 @@
 import express from 'express';
 import { prisma } from '../lib/prisma.js';
 import { authenticateToken } from '../middleware/auth.js';
-import { redisClient } from '../server.js';
+//import { redisClient } from '../server.js';
 
 const router = express.Router();
 
@@ -76,8 +76,13 @@ router.get('/:id', async (req, res) => {
     const { id } = req.params;
 
     // Increment view count in Redis
-    const viewKey = `video:${id}:views`;
-    await redisClient.incr(viewKey);
+   // const viewKey = `video:${id}:views`;
+  //  await redisClient.incr(viewKey);
+  
+  await prisma.video.update({
+  where: { id },
+  data: { viewsCount: { increment: 1 } }
+});
 
     const video = await prisma.video.findUnique({
       where: { id },
