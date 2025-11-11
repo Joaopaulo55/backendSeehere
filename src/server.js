@@ -3,7 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
-
+import uploadRoutes from './routes/upload.js';
 
 // Import routes
 import authRoutes from './routes/auth.js';
@@ -52,7 +52,7 @@ app.use('/api/videos', videoRoutes);
 app.use('/api/collections', collectionRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/admin', adminRoutes);
-
+app.use('/api/upload', uploadRoutes);
 // Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
