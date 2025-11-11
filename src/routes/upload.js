@@ -4,7 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import megaService from '../services/megaService.js';
 import { authenticateToken, requireAdmin } from '../middleware/auth.js';
-import ffmpeg from 'fluent-ffmpeg';
+//import ffmpeg from 'fluent-ffmpeg';
 import fs from 'fs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -41,17 +41,26 @@ const upload = multer({
 });
 
 // Função para gerar thumbnail do vídeo
+// COMENTE ou REMOVA estas linhas:
+// import ffmpeg from 'fluent-ffmpeg';
+
+// E na função generateThumbnail, substitua por:
 function generateThumbnail(videoPath, outputPath, timestamp = '00:00:05') {
   return new Promise((resolve, reject) => {
-    ffmpeg(videoPath)
-      .screenshots({
-        timestamps: [timestamp],
-        filename: path.basename(outputPath),
-        folder: path.dirname(outputPath),
-        size: '640x360'
-      })
-      .on('end', resolve)
-      .on('error', reject);
+    // Simular geração de thumbnail (vamos usar placeholder por enquanto)
+    console.log('📸 Thumbnail generation disabled - using placeholder');
+    
+    // Copiar uma imagem placeholder
+    const placeholderPath = path.join(__dirname, '../assets/placeholder-thumb.jpg');
+    
+    if (fs.existsSync(placeholderPath)) {
+      fs.copyFileSync(placeholderPath, outputPath);
+      resolve();
+    } else {
+      // Se não tem placeholder, cria um arquivo vazio e usa URL externa
+      fs.writeFileSync(outputPath, '');
+      resolve();
+    }
   });
 }
 
