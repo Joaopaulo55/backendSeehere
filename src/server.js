@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 import uploadRoutes from './routes/upload.js';
 
 // Import routes
+import megaService from './services/megaService.js';
 import authRoutes from './routes/auth.js';
 import videoRoutes from './routes/videos.js';
 import collectionRoutes from './routes/collections.js';
