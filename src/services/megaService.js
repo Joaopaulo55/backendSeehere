@@ -1,3 +1,4 @@
+// megaService.js - VERSÃO FUNCIONAL
 import mega from 'megajs';
 import fs from 'fs';
 import path from 'path';
@@ -9,97 +10,113 @@ class MegaService {
   constructor() {
     this.storage = null;
     this.isConnected = false;
-    this.init();
+    this.credentials = {
+      email: process.env.MEGA_EMAIL || 'xhanckin@gmail.com',
+      password: process.env.MEGA_PASSWORD || 'Xhackin@2025'
+    };
   }
 
-  async init() {
+  async connect() {
+    return new Promise((resolve, reject) => {
+      try {
+        console.log('🔗 Conectando ao MEGA.nz...');
+        
+        this.storage = new mega.Storage({
+          email: this.credentials.email,
+          password: this.credentials.password
+        });
+
+        this.storage.on('ready', () => {
+          this.isConnected = true;
+          console.log('✅ Conectado ao MEGA.nz com sucesso!');
+          resolve(true);
+        });
+
+        this.storage.on('error', (error) => {
+          console.error('❌ Erro na conexão MEGA:', error);
+          reject(error);
+        });
+
+        setTimeout(() => {
+          reject(new Error('Timeout na conexão com MEGA'));
+        }, 30000);
+
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
+  async uploadFile(filePath, fileName, options = {}) {
     try {
-      const email = process.env.MEGA_EMAIL;
-      const password = process.env.MEGA_PASSWORD;
-      
-      if (!email || !password) {
-        console.warn('⚠️  Credenciais MEGA não configuradas. Uploads desabilitados.');
-        return;
+      if (!this.isConnected) {
+        await this.connect();
       }
 
-      this.storage = new mega.Storage({
-        email: email,
-        password: password,
-        userAgent: 'Seehere/1.0'
-      });
-
-      await new Promise((resolve, reject) => {
-        this.storage.on('ready', resolve);
-        this.storage.on('error', reject);
-      });
-
-      this.isConnected = true;
-      console.log('✅ Conectado ao MEGA.nz');
-    } catch (error) {
-      console.error('❌ Erro ao conectar com MEGA:', error);
-      this.isConnected = false;
-    }
-  }
-
-  async uploadFile(filePath, fileName) {
-    if (!this.isConnected) {
-      throw new Error('Serviço MEGA não disponível');
-    }
-
-    try {
-      console.log(`📤 Enviando ${fileName} para MEGA...`);
+      console.log(`📤 Iniciando upload: ${fileName}`);
       
-      const file = await new Promise((resolve, reject) => {
-        fs.readFile(filePath, (err, data) => {
-          if (err) reject(err);
+      return new Promise((resolve, reject) => {
+        // ✅ CORRETO: passar filePath diretamente
+        this.storage.upload({
+          name: fileName,
+          attributes: {
+            description: options.description || 'Uploaded via Seehere'
+          }
+        }, filePath, (error, file) => {
+          if (error) {
+            console.error('❌ Erro no upload:', error);
+            reject(error);
+            return;
+          }
+
+          console.log('✅ Upload concluído, gerando link...');
+
+          // ✅ CORRETO: usar file.link sem callback
+          const downloadUrl = file.link;
           
-          this.storage.upload({
-            name: fileName,
-            size: data.length
-          }, data, (err, file) => {
-            if (err) reject(err);
-            resolve(file);
+          console.log(`🔗 Link gerado: ${downloadUrl}`);
+            
+          resolve({
+            fileId: file.downloadId,
+            downloadUrl: downloadUrl,
+            size: file.size,
+            name: file.name,
+            timestamp: new Date().toISOString()
           });
         });
       });
 
-      // Gerar link público
-      const link = await new Promise((resolve, reject) => {
-        file.link((err, url) => {
-          if (err) reject(err);
-          resolve(url);
-        });
-      });
-
-      // Limpar arquivo temporário
-      fs.unlinkSync(filePath);
-
-      return {
-        fileId: file.downloadId,
-        downloadUrl: link,
-        size: file.size,
-        name: file.name
-      };
     } catch (error) {
-      console.error('❌ Erro no upload para MEGA:', error);
+      console.error(`❌ Erro no upload de ${fileName}:`, error);
       throw error;
     }
   }
 
-  async deleteFile(fileId) {
-    if (!this.isConnected) return;
+  async ensureConnection() {
+    if (!this.isConnected) {
+      await this.connect();
+    }
+  }
 
+  // Método health check simplificado
+  async healthCheck() {
     try {
-      const file = this.storage.files.find(f => f.downloadId === fileId);
-      if (file) {
-        await file.delete();
-        console.log(`🗑️ Arquivo ${fileId} removido do MEGA`);
-      }
+      await this.ensureConnection();
+      return {
+        status: 'healthy',
+        connected: this.isConnected,
+        timestamp: new Date().toISOString()
+      };
     } catch (error) {
-      console.error('❌ Erro ao deletar arquivo do MEGA:', error);
+      return {
+        status: 'unhealthy',
+        connected: false,
+        error: error.message,
+        timestamp: new Date().toISOString()
+      };
     }
   }
 }
 
-export default new MegaService();
-
+const megaService = new MegaService();
+export default megaService;

@@ -1,16 +1,16 @@
+// upload.js - Versão Corrigida
 import express from 'express';
 import multer from 'multer';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import megaService from '../services/megaService.js';
 import { authenticateToken, requireAdmin } from '../middleware/auth.js';
-//import ffmpeg from 'fluent-ffmpeg';
 import fs from 'fs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const router = express.Router();
 
-// Configurar multer para upload temporário
+// Configurar multer
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const uploadDir = path.join(__dirname, '../uploads/temp');
@@ -27,44 +27,17 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage: storage,
-  limits: {
-    fileSize: 500 * 1024 * 1024, // 500MB limite
-  },
+  limits: { fileSize: 500 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    // Verificar tipo de arquivo
-    if (file.mimetype.startsWith('video/') || file.mimetype.startsWith('image/')) {
+    if (file.mimetype.startsWith('video/')) {
       cb(null, true);
     } else {
-      cb(new Error('Apenas arquivos de vídeo e imagem são permitidos'), false);
+      cb(new Error('Apenas arquivos de vídeo são permitidos'), false);
     }
   }
 });
 
-// Função para gerar thumbnail do vídeo
-// COMENTE ou REMOVA estas linhas:
-// import ffmpeg from 'fluent-ffmpeg';
-
-// E na função generateThumbnail, substitua por:
-function generateThumbnail(videoPath, outputPath, timestamp = '00:00:05') {
-  return new Promise((resolve, reject) => {
-    // Simular geração de thumbnail (vamos usar placeholder por enquanto)
-    console.log('📸 Thumbnail generation disabled - using placeholder');
-    
-    // Copiar uma imagem placeholder
-    const placeholderPath = path.join(__dirname, '../assets/placeholder-thumb.jpg');
-    
-    if (fs.existsSync(placeholderPath)) {
-      fs.copyFileSync(placeholderPath, outputPath);
-      resolve();
-    } else {
-      // Se não tem placeholder, cria um arquivo vazio e usa URL externa
-      fs.writeFileSync(outputPath, '');
-      resolve();
-    }
-  });
-}
-
-// Upload de vídeo com thumbnail automática
+// Upload de vídeo
 router.post('/video', authenticateToken, requireAdmin, upload.single('video'), async (req, res) => {
   try {
     if (!req.file) {
@@ -74,53 +47,43 @@ router.post('/video', authenticateToken, requireAdmin, upload.single('video'), a
     const { title, description, tags, collectionId } = req.body;
     
     if (!title) {
+      // Limpar arquivo temporário
+      fs.unlinkSync(req.file.path);
       return res.status(400).json({ error: 'Título é obrigatório' });
     }
 
     console.log(`📥 Processando upload: ${req.file.originalname}`);
 
-    // 1. Upload do vídeo para MEGA
+    // 1. Upload para MEGA
     const videoResult = await megaService.uploadFile(
       req.file.path, 
       `video-${Date.now()}-${req.file.originalname}`
     );
 
-    // 2. Gerar thumbnail automaticamente
-    let thumbnailResult = null;
-    try {
-      const thumbnailPath = path.join(path.dirname(req.file.path), `thumb-${Date.now()}.jpg`);
-      await generateThumbnail(req.file.path, thumbnailPath);
-      
-      thumbnailResult = await megaService.uploadFile(
-        thumbnailPath,
-        `thumb-${Date.now()}.jpg`
-      );
-    } catch (thumbError) {
-      console.warn('⚠️ Não foi possível gerar thumbnail:', thumbError);
-    }
-
-    // 3. Salvar no banco de dados
+    // 2. Salvar no banco de dados
     const { prisma } = await import('../lib/prisma.js');
     
+    const videoData = {
+      title,
+      description: description || '',
+      tags: tags ? tags.split(',').map(tag => tag.trim()) : [],
+      megaFileId: videoResult.fileId,
+      megaFileUrl: videoResult.downloadUrl,
+      urlStream: videoResult.downloadUrl,
+      urlDownload: videoResult.downloadUrl,
+      thumbnailUrl: null, // Pode adicionar thumbnail depois
+      durationSeconds: 0,
+      ownerId: req.user.id,
+      isPublished: true,
+      metadata: {
+        originalName: req.file.originalname,
+        fileSize: videoResult.size,
+        uploadedAt: new Date().toISOString()
+      }
+    };
+
     const video = await prisma.video.create({
-      data: {
-        title,
-        description: description || '',
-        tags: tags ? tags.split(',').map(tag => tag.trim()) : [],
-        megaFileId: videoResult.fileId,
-        megaFileUrl: videoResult.downloadUrl,
-        urlStream: videoResult.downloadUrl,
-        urlDownload: videoResult.downloadUrl,
-        thumbnailUrl: thumbnailResult?.downloadUrl || null,
-        durationSeconds: 0, // Poderia extrair com ffmpeg
-        ownerId: req.user.id,
-        isPublished: true,
-        metadata: {
-          originalName: req.file.originalname,
-          fileSize: videoResult.size,
-          uploadedAt: new Date().toISOString()
-        }
-      },
+      data: videoData,
       include: {
         owner: {
           select: { displayName: true }
@@ -128,7 +91,7 @@ router.post('/video', authenticateToken, requireAdmin, upload.single('video'), a
       }
     });
 
-    // 4. Adicionar à coleção se especificada
+    // 3. Adicionar à coleção se especificada
     if (collectionId) {
       await prisma.collectionVideo.create({
         data: {
@@ -139,18 +102,35 @@ router.post('/video', authenticateToken, requireAdmin, upload.single('video'), a
       });
     }
 
+    // 4. Limpar arquivo temporário
+    try {
+      fs.unlinkSync(req.file.path);
+      console.log('🧹 Arquivo temporário removido');
+    } catch (cleanupError) {
+      console.warn('⚠️ Não foi possível remover arquivo temporário');
+    }
+
     res.status(201).json({
       success: true,
       video,
       uploadInfo: {
         videoUrl: videoResult.downloadUrl,
-        thumbnailUrl: thumbnailResult?.downloadUrl,
         fileSize: videoResult.size
       }
     });
 
   } catch (error) {
     console.error('❌ Erro no upload:', error);
+    
+    // Limpar arquivo temporário em caso de erro
+    if (req.file && fs.existsSync(req.file.path)) {
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch (cleanupError) {
+        console.warn('⚠️ Não foi possível limpar arquivo temporário');
+      }
+    }
+    
     res.status(500).json({ 
       error: 'Falha no upload do vídeo',
       details: process.env.NODE_ENV === 'development' ? error.message : undefined
@@ -158,28 +138,4 @@ router.post('/video', authenticateToken, requireAdmin, upload.single('video'), a
   }
 });
 
-// Upload apenas de thumbnail
-router.post('/thumbnail', authenticateToken, requireAdmin, upload.single('thumbnail'), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'Nenhuma imagem enviada' });
-    }
-
-    const thumbnailResult = await megaService.uploadFile(
-      req.file.path,
-      `thumb-${Date.now()}-${req.file.originalname}`
-    );
-
-    res.json({
-      success: true,
-      thumbnailUrl: thumbnailResult.downloadUrl
-    });
-
-  } catch (error) {
-    console.error('❌ Erro no upload da thumbnail:', error);
-    res.status(500).json({ error: 'Falha no upload da thumbnail' });
-  }
-});
-
 export default router;
-
