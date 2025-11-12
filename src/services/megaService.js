@@ -299,29 +299,28 @@ class MegaService {
 
   // Health check
   async healthCheck() {
-    try {
-      await this.ensureConnection();
-      const storageInfo = await this.getStorageInfo();
-      
-      return {
-        status: 'healthy',
-        mega: {
-          connected: this.isConnected,
-          account: this.credentials.email,
-          storage: storageInfo
-        },
-        timestamp: new Date().toISOString()
-      };
-    } catch (error) {
-      return {
-        status: 'unhealthy',
-        mega: {
-          connected: false,
-          error: error.message
-        },
-        timestamp: new Date().toISOString()
-      };
-    }
+  try {
+    const isConnected = await this.ensureConnection();
+    const storageInfo = await this.getStorageInfo();
+    
+    return {
+      status: 'healthy',
+      mega: {
+        connected: isConnected,
+        account: this.credentials.email,
+        storage: storageInfo
+      },
+      timestamp: new Date().toISOString()
+    };
+  } catch (error) {
+    return {
+      status: 'unhealthy',
+      mega: {
+        connected: false,
+        error: error.message
+      },
+      timestamp: new Date().toISOString()
+    };
   }
 }
 
