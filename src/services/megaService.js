@@ -17,7 +17,7 @@ class MegaService {
     this.isConnected = false;
     this.credentials = {
       email: process.env.MEGA_EMAIL || 'xhanckin@gmail.com',
-      password: process.env.MEGA_PASSWORD || 'Xhackin@2025'
+      password: process.env.MEGA_PASSWORD || 'Xhackin@025'
     };
   }
 
