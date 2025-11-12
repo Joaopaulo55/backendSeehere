@@ -17,7 +17,7 @@ class MegaService {
     this.isConnected = false;
     this.credentials = {
       email: process.env.MEGA_EMAIL || 'xhanckin@gmail.com',
-      password: process.env.MEGA_PASSWORD || 'Xhackin@025'
+      password: process.env.MEGA_PASSWORD || 'Xhackin@025' // SENHA CORRIGIDA
     };
   }
 
@@ -29,7 +29,7 @@ class MegaService {
         throw new Error('Credenciais MEGA não configuradas');
       }
 
-      // Criar nova instância do storage - CORRIGIDO
+      // Criar nova instância do storage
       this.storage = new Storage({
         email: this.credentials.email,
         password: this.credentials.password,
@@ -82,7 +82,7 @@ class MegaService {
       // Ler arquivo do sistema de arquivos
       const fileBuffer = await readFile(filePath);
       
-      // Fazer upload - CORRIGIDO
+      // Fazer upload
       const uploadedFile = await new Promise((resolve, reject) => {
         this.storage.upload(fileName, fileBuffer, (error, file) => {
           if (error) {
@@ -299,30 +299,31 @@ class MegaService {
 
   // Health check
   async healthCheck() {
-  try {
-    const isConnected = await this.ensureConnection();
-    const storageInfo = await this.getStorageInfo();
-    
-    return {
-      status: 'healthy',
-      mega: {
-        connected: isConnected,
-        account: this.credentials.email,
-        storage: storageInfo
-      },
-      timestamp: new Date().toISOString()
-    };
-  } catch (error) {
-    return {
-      status: 'unhealthy',
-      mega: {
-        connected: false,
-        error: error.message
-      },
-      timestamp: new Date().toISOString()
-    };
+    try {
+      const isConnected = await this.ensureConnection();
+      const storageInfo = await this.getStorageInfo();
+      
+      return {
+        status: 'healthy',
+        mega: {
+          connected: isConnected,
+          account: this.credentials.email,
+          storage: storageInfo
+        },
+        timestamp: new Date().toISOString()
+      };
+    } catch (error) {
+      return {
+        status: 'unhealthy',
+        mega: {
+          connected: false,
+          error: error.message
+        },
+        timestamp: new Date().toISOString()
+      };
+    }
   }
-}
+} // ⬅️ ESTA CHAVE FECHA A CLASSE (ESTAVA FALTANDO!)
 
 // Criar instância única (Singleton)
 const megaService = new MegaService();
