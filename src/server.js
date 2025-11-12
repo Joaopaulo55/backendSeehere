@@ -58,6 +58,60 @@ app.get('/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
+// Rota de health check do MEGA
+app.get('/api/health/mega', async (req, res) => {
+  try {
+    const health = await megaService.healthCheck();
+    res.json(health);
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      message: error.message
+    });
+  }
+});
+
+// Rota de teste de conexão MEGA
+app.get('/api/test-mega', async (req, res) => {
+  try {
+    const isConnected = await megaService.ensureConnection();
+    const storageInfo = await megaService.getStorageInfo();
+    
+    res.json({
+      success: true,
+      connected: isConnected,
+      storage: storageInfo,
+      message: 'Conexão MEGA funcionando!'
+    });
+  } catch (error) {
+    res.json({
+      success: false,
+      connected: false,
+      error: error.message
+    });
+  }
+});
+
+// Rota para listar arquivos no MEGA (útil para debug)
+app.get('/api/mega-files', async (req, res) => {
+  try {
+    const files = await megaService.listFiles('/');
+    res.json({
+      success: true,
+      files: files
+    });
+  } catch (error) {
+    res.json({
+      success: false,
+      error: error.message,
+      files: []
+    });
+  }
+});
+
+
+
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
