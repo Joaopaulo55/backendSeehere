@@ -167,34 +167,35 @@ class MegaService {
     }
   }
 
-  async listFiles(path = '/') {
-    try {
-      await this.ensureConnection();
-
-      const files = await new Promise((resolve, reject) => {
-        this.storage.readdir(path, (error, files) => {
-          if (error) {
-            reject(error);
-          } else {
-            resolve(files);
-          }
-        });
-      });
-
-      return files.map(file => ({
-        name: file.name,
-        size: file.size,
-        type: file.directory ? 'folder' : 'file',
+  async listFiles() {
+  try {
+    await this.ensureConnection();
+    
+    console.log('🔍 Listando arquivos do MEGA (método simples)...');
+    
+    // Método mais direto - verificar se há files no storage
+    if (this.storage.files && Array.isArray(this.storage.files)) {
+      const files = this.storage.files.slice(0, 50).map(file => ({
+        name: file.name || `file_${file.nodeId}`,
+        size: file.size || 0,
+        type: 'file',
         downloadId: file.downloadId,
         nodeId: file.nodeId,
-        timestamp: file.timestamp
+        timestamp: file.timestamp || Date.now()
       }));
-
-    } catch (error) {
-      console.error('❌ Erro ao listar arquivos:', error);
-      throw error;
+      
+      console.log(`✅ Encontrados ${files.length} arquivos`);
+      return files;
+    } else {
+      console.log('📁 Nenhum arquivo encontrado (storage vazio)');
+      return [];
     }
+    
+  } catch (error) {
+    console.error('❌ Erro ao listar arquivos:', error.message);
+    return [];
   }
+}
 
   async deleteFile(fileId) {
     try {
