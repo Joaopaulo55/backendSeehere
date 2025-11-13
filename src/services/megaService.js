@@ -1,4 +1,4 @@
-// megaService.js - Versão com proteção contra bloqueios
+// megaService.js - Versão corrigida com melhor tratamento de conexão
 import { Storage } from 'megajs';
 import fs from 'fs';
 import path from 'path';
@@ -18,21 +18,25 @@ class MegaService {
     this.requestQueue = [];
     this.processingQueue = false;
     
-    // Configurações de rate limiting
+    // Configurações de rate limiting mais conservadoras para free plan
     this.rateLimit = {
-      maxRequestsPerMinute: 30, // Reduzido para segurança
-      minTimeBetweenRequests: 2000, // 2 segundos entre requests
-      retryDelay: 5000, // 5 segundos entre tentativas
-      maxRetries: 3
+      maxRequestsPerMinute: 20, // Reduzido ainda mais para free plan
+      minTimeBetweenRequests: 3000, // 3 segundos entre requests
+      retryDelay: 10000, // 10 segundos entre tentativas
+      maxRetries: 2, // Menos tentativas
+      connectionTimeout: 45000 // 45 segundos para conexão
     };
 
     this.credentials = {
       email: process.env.MEGA_EMAIL || 'xhanckin@gmail.com',
       password: process.env.MEGA_PASSWORD || 'Xhackin@2025/500'
     };
+
+    this.connectionAttempts = 0;
+    this.maxConnectionAttempts = 3;
   }
 
-  // Método com rate limiting e queue
+  // Método com rate limiting e queue melhorado
   async executeWithRateLimit(operation) {
     const now = Date.now();
     const timeSinceLastRequest = now - this.lastRequestTime;
@@ -68,9 +72,11 @@ class MegaService {
           break;
         }
         
-        // Aguardar antes da próxima tentativa
+        // Aguardar antes da próxima tentativa com backoff exponencial
         if (attempt < this.rateLimit.maxRetries) {
-          await new Promise(resolve => setTimeout(resolve, this.rateLimit.retryDelay * attempt));
+          const delay = this.rateLimit.retryDelay * Math.pow(2, attempt - 1);
+          console.log(`⏳ Aguardando ${delay/1000} segundos antes da próxima tentativa...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
         }
       }
     }
@@ -79,50 +85,76 @@ class MegaService {
   }
 
   async connect() {
+    if (this.connectionAttempts >= this.maxConnectionAttempts) {
+      throw new Error('Número máximo de tentativas de conexão excedido');
+    }
+
+    this.connectionAttempts++;
+
     return this.executeWithRateLimit(async () => {
       try {
-        console.log('🔗 Conectando ao MEGA.nz...');
+        console.log(`🔗 Tentativa ${this.connectionAttempts}/${this.maxConnectionAttempts} - Conectando ao MEGA.nz...`);
         
         if (!this.credentials.email || !this.credentials.password) {
           throw new Error('Credenciais MEGA não configuradas');
         }
 
-        // Criar nova instância do storage
+        // Limpar conexão anterior se existir
+        if (this.storage) {
+          try {
+            this.storage.close();
+          } catch (e) {
+            // Ignorar erros ao fechar conexão anterior
+          }
+          this.storage = null;
+        }
+
+        // Criar nova instância do storage com configurações otimizadas
         this.storage = new Storage({
           email: this.credentials.email,
           password: this.credentials.password,
-          autologin: false, // Mudar para false para mais controle
-          keepalive: false, // Desativar keepalive
-          //timeout: 30000 // Timeout de 30 segundos
+          autologin: true, // Mudar para true para melhor compatibilidade
+          keepalive: true, // Manter ativo para free plan
+          timeout: this.rateLimit.connectionTimeout
         });
 
-        // Aguardar conexão com timeout
+        // Aguardar conexão com timeout melhorado
         const connectionPromise = new Promise((resolve, reject) => {
           const timeout = setTimeout(() => {
-            reject(new Error('Timeout na conexão com MEGA'));
-          }, 30000);
+            reject(new Error(`Timeout na conexão com MEGA após ${this.rateLimit.connectionTimeout/1000} segundos`));
+          }, this.rateLimit.connectionTimeout);
 
-          this.storage.on('ready', () => {
+          const readyHandler = () => {
             clearTimeout(timeout);
+            this.storage.off('error', errorHandler);
             this.isConnected = true;
             this.isBlocked = false;
+            this.connectionAttempts = 0; // Resetar contador em sucesso
             console.log('✅ Conectado ao MEGA.nz com sucesso!');
-            console.log(`📁 Espaço usado: ${this.formatBytes(this.storage.usedSpace)}`);
-            console.log(`📊 Espaço total: ${this.formatBytes(this.storage.totalSpace)}`);
+            if (this.storage.usedSpace !== undefined && this.storage.totalSpace !== undefined) {
+              console.log(`📁 Espaço usado: ${this.formatBytes(this.storage.usedSpace)}`);
+              console.log(`📊 Espaço total: ${this.formatBytes(this.storage.totalSpace)}`);
+            }
             resolve();
-          });
+          };
 
-          this.storage.on('error', (error) => {
+          const errorHandler = (error) => {
             clearTimeout(timeout);
+            this.storage.off('ready', readyHandler);
             console.error('❌ Erro na conexão MEGA:', error.message);
             
             if (error.message.includes('blocked') || error.message.includes('EBLOCKED')) {
               this.isBlocked = true;
               reject(new Error('Conta MEGA bloqueada. Aguarde algumas horas.'));
+            } else if (error.message.includes('credentials') || error.message.includes('login')) {
+              reject(new Error('Credenciais MEGA inválidas'));
             } else {
               reject(error);
             }
-          });
+          };
+
+          this.storage.once('ready', readyHandler);
+          this.storage.once('error', errorHandler);
         });
 
         await connectionPromise;
@@ -134,6 +166,13 @@ class MegaService {
         
         if (error.message.includes('blocked') || error.message.includes('EBLOCKED')) {
           this.isBlocked = true;
+        }
+        
+        // Se não for bloqueio, tentar novamente depois
+        if (!this.isBlocked && this.connectionAttempts < this.maxConnectionAttempts) {
+          console.log(`🔄 Nova tentativa de conexão em ${this.rateLimit.retryDelay/1000} segundos...`);
+          await new Promise(resolve => setTimeout(resolve, this.rateLimit.retryDelay));
+          return this.connect();
         }
         
         throw error;
@@ -148,6 +187,18 @@ class MegaService {
     
     if (!this.isConnected || !this.storage) {
       await this.connect();
+    } else {
+      // Verificar se a conexão ainda está ativa
+      try {
+        // Tentar uma operação simples para verificar a conexão
+        if (this.storage.root && typeof this.storage.root === 'object') {
+          return; // Conexão parece estar ok
+        }
+      } catch (error) {
+        console.warn('⚠️ Conexão MEGA pode estar inativa, reconectando...');
+        this.isConnected = false;
+        await this.connect();
+      }
     }
   }
 
@@ -158,17 +209,34 @@ class MegaService {
 
         console.log(`📤 Iniciando upload: ${fileName}`);
         
+        // Verificar se arquivo existe
+        try {
+          await fs.promises.access(filePath);
+        } catch (error) {
+          throw new Error(`Arquivo não encontrado: ${filePath}`);
+        }
+        
+        // Obter stats do arquivo
+        const stats = await fs.promises.stat(filePath);
+        console.log(`📊 Tamanho do arquivo: ${this.formatBytes(stats.size)}`);
+        
         // Ler arquivo do sistema de arquivos
         const fileBuffer = await readFile(filePath);
         
-        // Fazer upload
+        // Fazer upload com tratamento de progresso
         const uploadedFile = await new Promise((resolve, reject) => {
-          this.storage.upload(fileName, fileBuffer, (error, file) => {
+          const upload = this.storage.upload(fileName, fileBuffer, (error, file) => {
             if (error) {
               reject(error);
             } else {
               resolve(file);
             }
+          });
+
+          // Opcional: adicionar listener de progresso
+          upload.on('progress', (info) => {
+            const percent = ((info.bytesLoaded / info.bytesTotal) * 100).toFixed(1);
+            console.log(`📤 Upload progresso: ${percent}%`);
           });
         });
 
@@ -197,7 +265,7 @@ class MegaService {
         };
 
       } catch (error) {
-        console.error(`❌ Erro no upload de ${fileName}:`, error);
+        console.error(`❌ Erro no upload de ${fileName}:`, error.message);
         throw new Error(`Falha no upload: ${error.message}`);
       }
     });
@@ -220,7 +288,7 @@ class MegaService {
         return link;
 
       } catch (error) {
-        console.error('❌ Erro ao gerar link público:', error);
+        console.error('❌ Erro ao gerar link público:', error.message);
         throw new Error(`Não foi possível gerar link público: ${error.message}`);
       }
     });
@@ -245,7 +313,7 @@ class MegaService {
         return folder;
 
       } catch (error) {
-        console.error(`❌ Erro ao criar pasta ${folderName}:`, error);
+        console.error(`❌ Erro ao criar pasta ${folderName}:`, error.message);
         throw error;
       }
     });
@@ -309,7 +377,7 @@ class MegaService {
         return downloadUrl;
 
       } catch (error) {
-        console.error(`❌ Erro ao gerar link para ${fileId}:`, error);
+        console.error(`❌ Erro ao gerar link para ${fileId}:`, error.message);
         
         if (error.message.includes('blocked') || error.message.includes('EBLOCKED')) {
           this.isBlocked = true;
@@ -381,7 +449,7 @@ class MegaService {
         return true;
 
       } catch (error) {
-        console.error(`❌ Erro ao deletar arquivo ${fileId}:`, error);
+        console.error(`❌ Erro ao deletar arquivo ${fileId}:`, error.message);
         throw error;
       }
     });
@@ -411,7 +479,7 @@ class MegaService {
         };
 
       } catch (error) {
-        console.error(`❌ Erro ao buscar info do arquivo ${fileId}:`, error);
+        console.error(`❌ Erro ao buscar info do arquivo ${fileId}:`, error.message);
         throw error;
       }
     });
@@ -432,7 +500,7 @@ class MegaService {
         };
 
       } catch (error) {
-        console.error('❌ Erro ao buscar info do storage:', error);
+        console.error('❌ Erro ao buscar info do storage:', error.message);
         throw error;
       }
     });
@@ -476,7 +544,7 @@ class MegaService {
         this.isConnected = false;
         console.log('🔌 Desconectado do MEGA.nz');
       } catch (error) {
-        console.error('❌ Erro ao desconectar:', error);
+        console.error('❌ Erro ao desconectar:', error.message);
       }
     }
   }
@@ -523,17 +591,47 @@ class MegaService {
       };
     }
   }
+
+  // Método para resetar conexão
+  async resetConnection() {
+    console.log('🔄 Resetando conexão MEGA...');
+    this.isConnected = false;
+    this.isBlocked = false;
+    this.connectionAttempts = 0;
+    
+    if (this.storage) {
+      try {
+        this.storage.close();
+      } catch (error) {
+        // Ignorar erros ao fechar
+      }
+      this.storage = null;
+    }
+    
+    return this.connect();
+  }
 }
 
 // Criar instância única (Singleton)
 const megaService = new MegaService();
 
-// Conectar automaticamente ao iniciar (mas não travar o startup)
-setTimeout(() => {
-  megaService.connect().catch(error => {
-    console.error('❌ Falha na conexão automática com MEGA:', error.message);
-  });
-}, 5000); // Delay inicial de 5 segundos
+// Conectar automaticamente ao iniciar com retry
+const initializeMegaConnection = async () => {
+  try {
+    console.log('🚀 Inicializando conexão MEGA...');
+    await megaService.connect();
+    console.log('✅ Conexão MEGA inicializada com sucesso!');
+  } catch (error) {
+    console.error('❌ Falha na inicialização da conexão MEGA:', error.message);
+    console.log('🔄 Nova tentativa em 30 segundos...');
+    
+    // Tentar novamente após 30 segundos
+    setTimeout(initializeMegaConnection, 30000);
+  }
+};
+
+// Delay inicial de 10 segundos para dar tempo ao servidor iniciar
+setTimeout(initializeMegaConnection, 10000);
 
 // Graceful shutdown
 process.on('SIGINT', async () => {
