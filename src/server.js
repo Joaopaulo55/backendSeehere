@@ -249,5 +249,5 @@ app.listen(PORT, () => {
     } catch (error) {
       console.warn('⚠️ MEGA não conectado na inicialização, mas servidor rodando:', error.message);
     }
-  }, 8000); // Delay maior para garantir que o servidor esteja estável
+  }, 5000); // Delay maior para garantir que o servidor esteja estável
 });

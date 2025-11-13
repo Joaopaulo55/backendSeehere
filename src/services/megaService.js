@@ -616,19 +616,7 @@ class MegaService {
 const megaService = new MegaService();
 
 // Conectar automaticamente ao iniciar com retry
-const initializeMegaConnection = async () => {
-  try {
-    console.log('🚀 Inicializando conexão MEGA...');
-    await megaService.connect();
-    console.log('✅ Conexão MEGA inicializada com sucesso!');
-  } catch (error) {
-    console.error('❌ Falha na inicialização da conexão MEGA:', error.message);
-    console.log('🔄 Nova tentativa em 30 segundos...');
-    
-    // Tentar novamente após 30 segundos
-    setTimeout(initializeMegaConnection, 30000);
-  }
-};
+
 
 // Delay inicial de 10 segundos para dar tempo ao servidor iniciar
 setTimeout(initializeMegaConnection, 10000);
