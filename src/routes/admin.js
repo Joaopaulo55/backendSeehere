@@ -43,6 +43,138 @@ router.get('/dashboard', async (req, res) => {
   }
 });
 
+
+// Adicione estas rotas ao arquivo admin.js
+
+// Get MEGA files not in database
+router.get('/mega-videos', async (req, res) => {
+  try {
+    const { prisma } = await import('../lib/prisma.js');
+    const megaService = await import('../services/megaService.js').then(m => m.default);
+    
+    // Get all videos from MEGA
+    const megaFiles = await megaService.listAllVideoFiles();
+    
+    // Get all videos from database to check which ones are already imported
+    const dbVideos = await prisma.video.findMany({
+      select: { megaFileId: true, title: true }
+    });
+    
+    const dbFileIds = dbVideos.map(video => video.megaFileId);
+    
+    // Mark which files are already in database
+    const megaFilesWithStatus = megaFiles.map(file => ({
+      ...file,
+      isInDatabase: dbFileIds.includes(file.downloadId),
+      existingTitle: dbVideos.find(v => v.megaFileId === file.downloadId)?.title || null
+    }));
+    
+    // Separate files
+    const notInDatabase = megaFilesWithStatus.filter(file => !file.isInDatabase);
+    const alreadyInDatabase = megaFilesWithStatus.filter(file => file.isInDatabase);
+    
+    res.json({
+      success: true,
+      notInDatabase,
+      alreadyInDatabase,
+      stats: {
+        totalInMega: megaFiles.length,
+        notImported: notInDatabase.length,
+        alreadyImported: alreadyInDatabase.length
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error fetching MEGA videos:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to fetch MEGA videos',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// Import video from MEGA to database
+router.post('/import-mega-video', async (req, res) => {
+  try {
+    const { prisma } = await import('../lib/prisma.js');
+    const megaService = await import('../services/megaService.js').then(m => m.default);
+    
+    const {
+      megaFileId,
+      title,
+      description,
+      tags,
+      thumbnailUrl,
+      collectionId
+    } = req.body;
+
+    if (!megaFileId || !title) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'MEGA file ID and title are required' 
+      });
+    }
+
+    // Verify file exists in MEGA and get download URL
+    const downloadUrl = await megaService.getFileDownloadLink(megaFileId);
+    
+    // Create video in database
+    const videoData = {
+      title,
+      description: description || '',
+      tags: tags ? (Array.isArray(tags) ? tags : tags.split(',').map(tag => tag.trim())) : [],
+      megaFileId,
+      megaFileUrl: downloadUrl,
+      urlStream: downloadUrl,
+      urlDownload: downloadUrl,
+      thumbnailUrl: thumbnailUrl || null,
+      durationSeconds: 0, // Você pode extrair isso depois usando ffmpeg ou similar
+      ownerId: req.user.id,
+      isPublished: true,
+      metadata: {
+        importedFromMega: true,
+        importedAt: new Date().toISOString()
+      }
+    };
+
+    const video = await prisma.video.create({
+      data: videoData,
+      include: {
+        owner: {
+          select: { displayName: true }
+        }
+      }
+    });
+
+    // Add to collection if specified
+    if (collectionId) {
+      await prisma.collectionVideo.create({
+        data: {
+          collectionId,
+          videoId: video.id,
+          position: 0
+        }
+      });
+    }
+
+    res.status(201).json({
+      success: true,
+      video,
+      message: 'Vídeo importado com sucesso do MEGA'
+    });
+
+  } catch (error) {
+    console.error('Error importing MEGA video:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to import video from MEGA',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+
 // Create video
 router.post('/videos', async (req, res) => {
   try {

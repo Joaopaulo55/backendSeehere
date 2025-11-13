@@ -1,6 +1,6 @@
 import express from 'express';
 import { prisma } from '../lib/prisma.js';
-import { authenticateToken } from '../middleware/auth.js';
+import { authenticateToken, requireAdmin } from '../middleware/auth.js'; // ✅ IMPORT CORRETO
 
 const router = express.Router();
 
@@ -33,6 +33,42 @@ router.get('/', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch collections' });
   }
 });
+
+// Create collection - ✅ CORRIGIDO
+router.post('/', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { name, description, thumbnailUrl, isFeatured } = req.body;
+
+    if (!name) {
+      return res.status(400).json({ error: 'Collection name is required' });
+    }
+
+    const collection = await prisma.collection.create({
+      data: {
+        name,
+        description: description || '',
+        thumbnailUrl: thumbnailUrl || null,
+        isFeatured: isFeatured || false,
+        createdById: req.user.id
+      },
+      include: {
+        createdBy: {
+          select: { displayName: true }
+        },
+        _count: {
+          select: { videos: true, favorites: true }
+        }
+      }
+    });
+
+    res.status(201).json({ collection });
+  } catch (error) {
+    console.error('Error creating collection:', error);
+    res.status(500).json({ error: 'Failed to create collection' });
+  }
+});
+
+// ... resto do código permanece igual
 
 // Get single collection
 router.get('/:id', async (req, res) => {

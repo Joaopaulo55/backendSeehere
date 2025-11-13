@@ -167,6 +167,65 @@ class MegaService {
     }
   }
 
+  // Adicione este método à classe MegaService no arquivo megaService.js
+
+async listAllVideoFiles() {
+  try {
+    await this.ensureConnection();
+    
+    console.log('🔍 Buscando todos os arquivos de vídeo no MEGA...');
+    
+    const allFiles = this.storage.files || [];
+    
+    // Filtrar apenas arquivos de vídeo
+    const videoFiles = allFiles.filter(file => {
+      const fileName = file.name || '';
+      const isVideo = /\.(mp4|avi|mov|mkv|wmv|flv|webm|m4v|3gp|mpeg|mpg)$/i.test(fileName);
+      
+      return isVideo && file.size > 0;
+    }).map(file => ({
+      name: file.name,
+      size: file.size,
+      formattedSize: this.formatBytes(file.size),
+      downloadId: file.downloadId,
+      nodeId: file.nodeId,
+      downloadUrl: null, // Será gerado sob demanda
+      timestamp: file.timestamp || Date.now(),
+      isInDatabase: false // Será verificado depois
+    }));
+
+    console.log(`✅ Encontrados ${videoFiles.length} arquivos de vídeo no MEGA`);
+    return videoFiles;
+    
+  } catch (error) {
+    console.error('❌ Erro ao listar arquivos de vídeo:', error.message);
+    return [];
+  }
+}
+
+// Método para gerar link de download para um arquivo específico
+async getFileDownloadLink(fileId) {
+  try {
+    await this.ensureConnection();
+
+    const file = this.storage.files.find(f => 
+      f.downloadId === fileId || f.nodeId === fileId
+    );
+    
+    if (!file) {
+      throw new Error(`Arquivo não encontrado: ${fileId}`);
+    }
+
+    const downloadUrl = await this.generatePublicLink(file);
+    return downloadUrl;
+
+  } catch (error) {
+    console.error(`❌ Erro ao gerar link para ${fileId}:`, error);
+    throw error;
+  }
+}
+  
+  
   async listFiles() {
   try {
     await this.ensureConnection();
