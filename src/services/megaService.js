@@ -619,7 +619,6 @@ const megaService = new MegaService();
 
 
 // Delay inicial de 10 segundos para dar tempo ao servidor iniciar
-setTimeout(initializeMegaConnection, 10000);
 
 // Graceful shutdown
 process.on('SIGINT', async () => {
