@@ -319,7 +319,11 @@ class MegaService {
     });
   }
 
-  async function listAllVideoFilesRecursive() {
+  // megaService.js - VERSÃO CORRIGIDA
+
+// Adicione estas funções dentro da classe MegaService:
+
+async listAllVideoFilesRecursive() {
     return this.executeWithRateLimit(async () => {
       try {
         await this.ensureConnection();
@@ -359,7 +363,7 @@ class MegaService {
                     downloadUrl: null,
                     timestamp: item.timestamp || Date.now(),
                     isInDatabase: false,
-                    path: folder.name || 'root' // Para debug
+                    path: folder.name || 'root'
                   });
                 }
               }
@@ -380,6 +384,79 @@ class MegaService {
         return [];
       }
     });
+}
+
+async listVideosInFolder(folderPath = 'Mega/seehere-videos') {
+    return this.executeWithRateLimit(async () => {
+      try {
+        await this.ensureConnection();
+        
+        console.log(`🔍 Buscando vídeos na pasta: ${folderPath}`);
+        
+        // Navegar para a pasta específica
+        let currentFolder = this.storage.root;
+        const pathParts = folderPath.split('/').filter(part => part.trim());
+        
+        for (const part of pathParts) {
+          const children = await new Promise((resolve, reject) => {
+            currentFolder.children((error, children) => {
+              if (error) reject(error);
+              else resolve(children || []);
+            });
+          });
+          
+          const nextFolder = children.find(child => 
+            child.directory && child.name === part
+          );
+          
+          if (!nextFolder) {
+            console.log(`❌ Pasta não encontrada: ${part} em ${folderPath}`);
+            return []; // Retorna array vazio se pasta não existe
+          }
+          
+          currentFolder = nextFolder;
+        }
+        
+        // Listar arquivos de vídeo na pasta encontrada
+        const children = await new Promise((resolve, reject) => {
+          currentFolder.children((error, children) => {
+            if (error) reject(error);
+            else resolve(children || []);
+          });
+        });
+        
+        const videoFiles = children
+          .filter(item => !item.directory)
+          .filter(item => {
+            const fileName = item.name || '';
+            const isVideo = /\.(mp4|avi|mov|mkv|wmv|flv|webm|m4v|3gp|mpeg|mpg)$/i.test(fileName);
+            return isVideo && item.size > 0;
+          })
+          .map(item => ({
+            name: item.name,
+            size: item.size,
+            formattedSize: this.formatBytes(item.size),
+            downloadId: item.downloadId,
+            nodeId: item.nodeId,
+            downloadUrl: null,
+            timestamp: item.timestamp || Date.now(),
+            isInDatabase: false,
+            path: folderPath
+          }));
+        
+        console.log(`✅ Encontrados ${videoFiles.length} vídeos em ${folderPath}`);
+        return videoFiles;
+        
+      } catch (error) {
+        console.error(`❌ Erro ao buscar vídeos em ${folderPath}:`, error.message);
+        return [];
+      }
+    });
+}
+
+// Atualize a função original para usar a recursiva (opcional)
+async listAllVideoFiles() {
+    return await this.listVideosInFolder('Mega/seehere-videos'); // Ou use a recursiva se preferir
 }
 
 // Atualizar a função original para usar a recursiva

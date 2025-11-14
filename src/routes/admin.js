@@ -52,7 +52,10 @@ router.get('/mega-videos', async (req, res) => {
     const { prisma } = await import('../lib/prisma.js');
     const megaService = await import('../services/megaService.js').then(m => m.default);
     
-    const megaFiles = await megaService.listAllVideoFiles();
+    // Use a nova função específica
+    const megaFiles = await megaService.listVideosInFolder('Mega/seehere-videos');
+    
+    console.log(`📊 Total de arquivos encontrados no MEGA: ${megaFiles.length}`);
     
     // Get all videos from MEGA
     const megaFiles = await megaService.listAllVideoFiles();
