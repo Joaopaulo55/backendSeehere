@@ -319,46 +319,73 @@ class MegaService {
     });
   }
 
-  async listAllVideoFiles() {
+  async function listAllVideoFilesRecursive() {
     return this.executeWithRateLimit(async () => {
       try {
         await this.ensureConnection();
         
-        console.log('🔍 Buscando todos os arquivos de vídeo no MEGA...');
+        console.log('🔍 Buscando todos os arquivos de vídeo no MEGA (recursivo)...');
         
-        const allFiles = this.storage.files || [];
+        const allVideoFiles = [];
         
-        // Filtrar apenas arquivos de vídeo
-        const videoFiles = allFiles.filter(file => {
-          const fileName = file.name || '';
-          const isVideo = /\.(mp4|avi|mov|mkv|wmv|flv|webm|m4v|3gp|mpeg|mpg)$/i.test(fileName);
-          
-          return isVideo && file.size > 0;
-        }).map(file => ({
-          name: file.name,
-          size: file.size,
-          formattedSize: this.formatBytes(file.size),
-          downloadId: file.downloadId,
-          nodeId: file.nodeId,
-          downloadUrl: null,
-          timestamp: file.timestamp || Date.now(),
-          isInDatabase: false
-        }));
-
-        console.log(`✅ Encontrados ${videoFiles.length} arquivos de vídeo no MEGA`);
-        return videoFiles;
+        // Função recursiva para buscar em todas as pastas
+        const searchInFolder = async (folder) => {
+          try {
+            // Listar conteúdo da pasta atual
+            const children = await new Promise((resolve, reject) => {
+              folder.children((error, children) => {
+                if (error) reject(error);
+                else resolve(children || []);
+              });
+            });
+            
+            for (const item of children) {
+              if (item.directory) {
+                // É uma pasta - buscar recursivamente
+                console.log(`📁 Buscando na pasta: ${item.name}`);
+                await searchInFolder(item);
+              } else {
+                // É um arquivo - verificar se é vídeo
+                const fileName = item.name || '';
+                const isVideo = /\.(mp4|avi|mov|mkv|wmv|flv|webm|m4v|3gp|mpeg|mpg)$/i.test(fileName);
+                
+                if (isVideo && item.size > 0) {
+                  allVideoFiles.push({
+                    name: item.name,
+                    size: item.size,
+                    formattedSize: this.formatBytes(item.size),
+                    downloadId: item.downloadId,
+                    nodeId: item.nodeId,
+                    downloadUrl: null,
+                    timestamp: item.timestamp || Date.now(),
+                    isInDatabase: false,
+                    path: folder.name || 'root' // Para debug
+                  });
+                }
+              }
+            }
+          } catch (error) {
+            console.error(`❌ Erro ao buscar na pasta ${folder.name}:`, error.message);
+          }
+        };
+        
+        // Começar busca a partir da pasta raiz
+        await searchInFolder(this.storage.root);
+        
+        console.log(`✅ Encontrados ${allVideoFiles.length} arquivos de vídeo no MEGA (recursivo)`);
+        return allVideoFiles;
         
       } catch (error) {
-        console.error('❌ Erro ao listar arquivos de vídeo:', error.message);
-        
-        if (error.message.includes('blocked') || error.message.includes('EBLOCKED')) {
-          this.isBlocked = true;
-        }
-        
+        console.error('❌ Erro ao listar arquivos de vídeo recursivamente:', error.message);
         return [];
       }
     });
-  }
+}
+
+// Atualizar a função original para usar a recursiva
+async function listAllVideoFiles() {
+    return await this.listAllVideoFilesRecursive();
+}
 
   async getFileDownloadLink(fileId) {
     return this.executeWithRateLimit(async () => {
