@@ -1,4 +1,4 @@
-// auth.js - VERSÃO CORRIGIDA COM ROLE ADMIN
+// auth.js - VERSÃO COMPLETAMENTE CORRIGIDA
 import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -7,7 +7,7 @@ import { authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Signup - 🔥 CORREÇÃO: Admin tem role ADMIN
+// Signup - 🔥 CORREÇÃO DEFINITIVA
 router.post('/signup', async (req, res) => {
   try {
     const { email, password, displayName } = req.body;
@@ -23,12 +23,16 @@ router.post('/signup', async (req, res) => {
 
     const passwordHash = await bcrypt.hash(password, 12);
 
-    // 🔥 CORREÇÃO CRÍTICA: Definir role como ADMIN para email específico
-    const isAdminEmail = email === 'admin@seehere.com' || 
-                        email === 'superadmin@seehere.com' || 
-                        email === 'emergency_admin@seehere.com';
+    // 🔥 CORREÇÃO CRÍTICA: Emails específicos são ADMIN
+    const adminEmails = [
+      'admin@seehere.com',
+      'superadmin@seehere.com', 
+      'emergency_admin@seehere.com',
+      'admin_fixed@seehere.com',
+      'superadmin_fixed@seehere.com'
+    ];
     
-    const userRole = isAdminEmail ? 'ADMIN' : 'USER';
+    const userRole = adminEmails.includes(email) ? 'ADMIN' : 'USER';
 
     console.log(`👤 Criando usuário: ${email} com role: ${userRole}`);
 
@@ -37,7 +41,7 @@ router.post('/signup', async (req, res) => {
         email,
         passwordHash,
         displayName: displayName || email.split('@')[0],
-        role: userRole, // 🔥 AGORA SERÁ ADMIN PARA EMAILS ESPECÍFICOS
+        role: userRole,
         preferences: {
           theme: 'system',
           notifications: true
@@ -61,7 +65,7 @@ router.post('/signup', async (req, res) => {
   }
 });
 
-// Login - Mantém igual
+// Login
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
