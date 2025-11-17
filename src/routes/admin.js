@@ -1,9 +1,12 @@
+// admin.js - VERSÃO COMPLETAMENTE CORRIGIDA
 import express from 'express';
 import { prisma } from '../lib/prisma.js';
 import { authenticateToken, requireAdmin } from '../middleware/auth.js';
+import megaService from '../services/megaService.js'; // ✅ IMPORT DIRETO
 
 const router = express.Router();
 
+// ✅ MIDDLEWARES GLOBAIS CORRETOS
 router.use(authenticateToken);
 router.use(requireAdmin);
 
@@ -43,22 +46,56 @@ router.get('/dashboard', async (req, res) => {
   }
 });
 
-
-// Adicione estas rotas ao arquivo admin.js
-
-// Get MEGA files not in database
+// Get MEGA files not in database - 🔥 CORREÇÃO COMPLETA
 router.get('/mega-videos', async (req, res) => {
   try {
-    const { prisma } = await import('../lib/prisma.js');
-    const megaService = await import('../services/megaService.js').then(m => m.default);
+    console.log('🔐 Usuário autenticado para MEGA videos:', req.user.email);
     
-    // Use a nova função específica
-    //const megaFiles = await megaService.listVideosInFolder('Mega/seehere-videos');
+    console.log('🔍 Buscando vídeos no MEGA...');
     
+    let megaFiles = [];
     
-    // Get all videos from MEGA
-    const megaFiles = await megaService.listAllVideoFiles();
-    console.log(`📊 Total de arquivos encontrados no MEGA: ${megaFiles.length}`);
+    try {
+      // Primeiro tenta na pasta específica
+      console.log('🔍 Buscando na pasta específica...');
+      megaFiles = await megaService.listVideosInFolder('Mega/seehere-videos');
+      
+      // Se não encontrar, busca em todas as pastas
+      if (megaFiles.length === 0) {
+        console.log('🔍 Nenhum vídeo na pasta específica, buscando em todas as pastas...');
+        megaFiles = await megaService.listAllVideoFilesRecursive();
+      }
+      
+      console.log(`📊 Total de arquivos encontrados: ${megaFiles.length}`);
+      
+    } catch (megaError) {
+      console.error('❌ Erro ao buscar no MEGA:', megaError.message);
+      
+      // Se der erro de bloqueio, retorna dados vazios mas sucesso
+      if (megaError.message.includes('blocked') || megaError.message.includes('EBLOCKED')) {
+        return res.json({
+          success: true,
+          notInDatabase: [],
+          alreadyInDatabase: [],
+          stats: {
+            totalInMega: 0,
+            notImported: 0,
+            alreadyImported: 0
+          },
+          message: 'Conta MEGA temporariamente bloqueada. Tente novamente mais tarde.'
+        });
+      }
+      
+      // Se for outro erro, tenta a busca recursiva como fallback
+      console.log('🔄 Tentando busca recursiva como fallback...');
+      try {
+        megaFiles = await megaService.listAllVideoFilesRecursive();
+        console.log(`📊 Fallback: ${megaFiles.length} arquivos encontrados`);
+      } catch (fallbackError) {
+        console.error('❌ Fallback também falhou:', fallbackError.message);
+        throw new Error(`Falha na conexão com MEGA: ${megaError.message}`);
+      }
+    }
     
     // Get all videos from database to check which ones are already imported
     const dbVideos = await prisma.video.findMany({
@@ -78,6 +115,8 @@ router.get('/mega-videos', async (req, res) => {
     const notInDatabase = megaFilesWithStatus.filter(file => !file.isInDatabase);
     const alreadyInDatabase = megaFilesWithStatus.filter(file => file.isInDatabase);
     
+    console.log(`✅ Não importados: ${notInDatabase.length}, Já importados: ${alreadyInDatabase.length}`);
+    
     res.json({
       success: true,
       notInDatabase,
@@ -90,20 +129,19 @@ router.get('/mega-videos', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Error fetching MEGA videos:', error);
+    console.error('❌ Error fetching MEGA videos:', error);
     res.status(500).json({ 
       success: false,
       error: 'Failed to fetch MEGA videos',
-      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      details: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
 
-// Import video from MEGA to database
+// Import video from MEGA to database - 🔥 CORREÇÃO
 router.post('/import-mega-video', async (req, res) => {
   try {
-    const { prisma } = await import('../lib/prisma.js');
-    const megaService = await import('../services/megaService.js').then(m => m.default);
+    console.log('📥 Importando vídeo do MEGA...');
     
     const {
       megaFileId,
@@ -134,7 +172,7 @@ router.post('/import-mega-video', async (req, res) => {
       urlStream: downloadUrl,
       urlDownload: downloadUrl,
       thumbnailUrl: thumbnailUrl || null,
-      durationSeconds: 0, // Você pode extrair isso depois usando ffmpeg ou similar
+      durationSeconds: 0,
       ownerId: req.user.id,
       isPublished: true,
       metadata: {
@@ -163,6 +201,8 @@ router.post('/import-mega-video', async (req, res) => {
       });
     }
 
+    console.log('✅ Vídeo importado com sucesso:', video.id);
+
     res.status(201).json({
       success: true,
       video,
@@ -178,7 +218,6 @@ router.post('/import-mega-video', async (req, res) => {
     });
   }
 });
-
 
 // Create video
 router.post('/videos', async (req, res) => {
@@ -283,20 +322,34 @@ router.get('/videos', async (req, res) => {
 // Create collection
 router.post('/collections', async (req, res) => {
   try {
+    console.log('🔐 Usuário criando coleção:', req.user.email);
+    
     const { name, description, thumbnailUrl, isFeatured } = req.body;
+
+    if (!name) {
+      return res.status(400).json({ error: 'Collection name is required' });
+    }
 
     const collection = await prisma.collection.create({
       data: {
         name,
-        description,
-        thumbnailUrl,
+        description: description || '',
+        thumbnailUrl: thumbnailUrl || null,
         isFeatured: isFeatured || false,
         createdById: req.user.id
+      },
+      include: {
+        createdBy: {
+          select: { displayName: true }
+        }
       }
     });
 
+    console.log('✅ Coleção criada com sucesso:', collection.id);
+
     res.status(201).json({ collection });
   } catch (error) {
+    console.error('Error creating collection:', error);
     res.status(500).json({ error: 'Failed to create collection' });
   }
 });

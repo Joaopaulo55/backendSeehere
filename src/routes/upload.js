@@ -1,10 +1,11 @@
-// upload.js - Versão Corrigida
+// upload.js - VERSÃO COMPLETAMENTE CORRIGIDA
 import express from 'express';
 import multer from 'multer';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import megaService from '../services/megaService.js';
 import { authenticateToken, requireAdmin } from '../middleware/auth.js';
+import { prisma } from '../lib/prisma.js'; // ✅ IMPORT DIRETO
 import fs from 'fs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -37,105 +38,115 @@ const upload = multer({
   }
 });
 
-// Upload de vídeo
-router.post('/video', authenticateToken, requireAdmin, upload.single('video'), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'Nenhum arquivo enviado' });
-    }
-
-    const { title, description, tags, collectionId } = req.body;
-    
-    if (!title) {
-      // Limpar arquivo temporário
-      fs.unlinkSync(req.file.path);
-      return res.status(400).json({ error: 'Título é obrigatório' });
-    }
-
-    console.log(`📥 Processando upload: ${req.file.originalname}`);
-
-    // 1. Upload para MEGA
-    const videoResult = await megaService.uploadFile(
-      req.file.path, 
-      `video-${Date.now()}-${req.file.originalname}`
-    );
-
-    // 2. Salvar no banco de dados
-    const { prisma } = await import('../lib/prisma.js');
-    
-    const videoData = {
-      title,
-      description: description || '',
-      tags: tags ? tags.split(',').map(tag => tag.trim()) : [],
-      megaFileId: videoResult.fileId,
-      megaFileUrl: videoResult.downloadUrl,
-      urlStream: videoResult.downloadUrl,
-      urlDownload: videoResult.downloadUrl,
-      thumbnailUrl: null, // Pode adicionar thumbnail depois
-      durationSeconds: 0,
-      ownerId: req.user.id,
-      isPublished: true,
-      metadata: {
-        originalName: req.file.originalname,
-        fileSize: videoResult.size,
-        uploadedAt: new Date().toISOString()
+// Upload de vídeo - 🔥 CORREÇÃO COMPLETA
+router.post('/video', 
+  authenticateToken, 
+  requireAdmin,
+  upload.single('video'), 
+  async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: 'Nenhum arquivo enviado' });
       }
-    };
 
-    const video = await prisma.video.create({
-      data: videoData,
-      include: {
-        owner: {
-          select: { displayName: true }
+      console.log('✅ Usuário autenticado para upload:', req.user.email);
+      console.log('✅ Role do usuário:', req.user.role);
+
+      const { title, description, tags, collectionId } = req.body;
+      
+      if (!title) {
+        // Limpar arquivo temporário
+        fs.unlinkSync(req.file.path);
+        return res.status(400).json({ error: 'Título é obrigatório' });
+      }
+
+      console.log(`📥 Processando upload: ${req.file.originalname}`);
+
+      // 1. Upload para MEGA
+      const videoResult = await megaService.uploadFile(
+        req.file.path, 
+        `video-${Date.now()}-${req.file.originalname}`
+      );
+
+      console.log('✅ Upload MEGA concluído, salvando no banco...');
+
+      // 2. Salvar no banco de dados - ✅ USA IMPORT DIRETO
+      const videoData = {
+        title,
+        description: description || '',
+        tags: tags ? tags.split(',').map(tag => tag.trim()) : [],
+        megaFileId: videoResult.fileId,
+        megaFileUrl: videoResult.downloadUrl,
+        urlStream: videoResult.downloadUrl,
+        urlDownload: videoResult.downloadUrl,
+        thumbnailUrl: null,
+        durationSeconds: 0,
+        ownerId: req.user.id,
+        isPublished: true,
+        metadata: {
+          originalName: req.file.originalname,
+          fileSize: videoResult.size,
+          uploadedAt: new Date().toISOString()
         }
-      }
-    });
+      };
 
-    // 3. Adicionar à coleção se especificada
-    if (collectionId) {
-      await prisma.collectionVideo.create({
-        data: {
-          collectionId,
-          videoId: video.id,
-          position: 0
+      const video = await prisma.video.create({
+        data: videoData,
+        include: {
+          owner: {
+            select: { displayName: true }
+          }
         }
       });
-    }
 
-    // 4. Limpar arquivo temporário
-    try {
-      fs.unlinkSync(req.file.path);
-      console.log('🧹 Arquivo temporário removido');
-    } catch (cleanupError) {
-      console.warn('⚠️ Não foi possível remover arquivo temporário');
-    }
-
-    res.status(201).json({
-      success: true,
-      video,
-      uploadInfo: {
-        videoUrl: videoResult.downloadUrl,
-        fileSize: videoResult.size
+      // 3. Adicionar à coleção se especificada
+      if (collectionId) {
+        await prisma.collectionVideo.create({
+          data: {
+            collectionId,
+            videoId: video.id,
+            position: 0
+          }
+        });
       }
-    });
 
-  } catch (error) {
-    console.error('❌ Erro no upload:', error);
-    
-    // Limpar arquivo temporário em caso de erro
-    if (req.file && fs.existsSync(req.file.path)) {
+      // 4. Limpar arquivo temporário
       try {
         fs.unlinkSync(req.file.path);
+        console.log('🧹 Arquivo temporário removido');
       } catch (cleanupError) {
-        console.warn('⚠️ Não foi possível limpar arquivo temporário');
+        console.warn('⚠️ Não foi possível remover arquivo temporário');
       }
+
+      console.log('✅ Vídeo criado com sucesso no banco:', video.id);
+
+      res.status(201).json({
+        success: true,
+        video,
+        uploadInfo: {
+          videoUrl: videoResult.downloadUrl,
+          fileSize: videoResult.size
+        }
+      });
+
+    } catch (error) {
+      console.error('❌ Erro no upload:', error);
+      
+      // Limpar arquivo temporário em caso de erro
+      if (req.file && fs.existsSync(req.file.path)) {
+        try {
+          fs.unlinkSync(req.file.path);
+        } catch (cleanupError) {
+          console.warn('⚠️ Não foi possível limpar arquivo temporário');
+        }
+      }
+      
+      res.status(500).json({ 
+        error: 'Falha no upload do vídeo',
+        details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
     }
-    
-    res.status(500).json({ 
-      error: 'Falha no upload do vídeo',
-      details: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
   }
-});
+);
 
 export default router;
