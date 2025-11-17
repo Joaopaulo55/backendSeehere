@@ -1,4 +1,4 @@
-// auth.js - ROUTES CORRIGIDO
+// auth.js - VERSÃO CORRIGIDA COM ROLE ADMIN
 import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -7,7 +7,7 @@ import { authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Signup
+// Signup - 🔥 CORREÇÃO: Admin tem role ADMIN
 router.post('/signup', async (req, res) => {
   try {
     const { email, password, displayName } = req.body;
@@ -23,12 +23,21 @@ router.post('/signup', async (req, res) => {
 
     const passwordHash = await bcrypt.hash(password, 12);
 
+    // 🔥 CORREÇÃO CRÍTICA: Definir role como ADMIN para email específico
+    const isAdminEmail = email === 'admin@seehere.com' || 
+                        email === 'superadmin@seehere.com' || 
+                        email === 'emergency_admin@seehere.com';
+    
+    const userRole = isAdminEmail ? 'ADMIN' : 'USER';
+
+    console.log(`👤 Criando usuário: ${email} com role: ${userRole}`);
+
     const user = await prisma.user.create({
       data: {
         email,
         passwordHash,
         displayName: displayName || email.split('@')[0],
-        role: 'USER', // Definir role padrão
+        role: userRole, // 🔥 AGORA SERÁ ADMIN PARA EMAILS ESPECÍFICOS
         preferences: {
           theme: 'system',
           notifications: true
@@ -43,6 +52,8 @@ router.post('/signup', async (req, res) => {
       { expiresIn: '7d' }
     );
 
+    console.log(`✅ Usuário criado: ${user.email} com role: ${user.role}`);
+
     res.status(201).json({ user, token });
   } catch (error) {
     console.error('Error in signup:', error);
@@ -50,7 +61,7 @@ router.post('/signup', async (req, res) => {
   }
 });
 
-// Login
+// Login - Mantém igual
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;

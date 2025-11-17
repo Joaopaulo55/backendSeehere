@@ -3,6 +3,38 @@ import express from 'express';
 import { prisma } from '../lib/prisma.js';
 import { authenticateToken, requireAdmin } from '../middleware/auth.js';
 import megaService from '../services/megaService.js';
+import { fixUserRoles } from '../fix-users.js';
+
+
+// Rota para corrigir roles dos usuários
+router.post('/fix-users-roles', async (req, res) => {
+  try {
+    console.log('🔧 Solicitada correção de roles de usuários');
+    
+    await fixUserRoles();
+    
+    // Verificar usuários após correção
+    const users = await prisma.user.findMany({
+      select: { email: true, role: true, displayName: true }
+    });
+    
+    res.json({
+      success: true,
+      message: 'Roles dos usuários corrigidas com sucesso',
+      users: users
+    });
+  } catch (error) {
+    console.error('❌ Erro na correção de roles:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Falha ao corrigir roles dos usuários',
+      details: error.message
+    });
+  }
+});
+
+
+
 
 const router = express.Router();
 
