@@ -3,7 +3,7 @@ import express from 'express';
 import { prisma } from '../lib/prisma.js';
 import { authenticateToken, requireAdmin } from '../middleware/auth.js';
 import megaService from '../services/megaService.js';
-import { fixUserRoles } from '../fix-users.js';
+import { fixUserRoles } from './fix-users.js';
 
 
 // Rota para corrigir roles dos usuários
