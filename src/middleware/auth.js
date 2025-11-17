@@ -1,4 +1,4 @@
-// auth.js - MIDDLEWARE CORRIGIDO
+// auth.js - MIDDLEWARE CORRIGIDO E MELHORADO
 import jwt from 'jsonwebtoken';
 import { prisma } from '../lib/prisma.js';
 
@@ -36,7 +36,16 @@ export const authenticateToken = async (req, res, next) => {
     next();
   } catch (error) {
     console.error('❌ Token verification error:', error.message);
-    return res.status(403).json({ error: 'Invalid token' });
+    
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({ error: 'Token expired' });
+    }
+    
+    if (error.name === 'JsonWebTokenError') {
+      return res.status(403).json({ error: 'Invalid token' });
+    }
+    
+    return res.status(403).json({ error: 'Token verification failed' });
   }
 };
 
@@ -49,9 +58,14 @@ export const requireAdmin = (req, res, next) => {
     return res.status(401).json({ error: 'Authentication required' });
   }
   
+  // 🔥 CORREÇÃO: Verificar se o usuário é ADMIN ou EDITOR
   if (req.user.role !== 'ADMIN' && req.user.role !== 'EDITOR') {
     console.log('❌ Acesso negado: usuário não é ADMIN ou EDITOR');
-    return res.status(403).json({ error: 'Admin access required' });
+    return res.status(403).json({ 
+      error: 'Admin access required',
+      userRole: req.user.role,
+      requiredRoles: ['ADMIN', 'EDITOR']
+    });
   }
   
   console.log('✅ Acesso admin permitido');

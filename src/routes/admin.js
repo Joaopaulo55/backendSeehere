@@ -1,12 +1,12 @@
-// admin.js - VERSÃO COMPLETAMENTE CORRIGIDA
+// admin.js - VERSÃO COMPLETAMENTE CORRIGIDA E FUNCIONAL
 import express from 'express';
 import { prisma } from '../lib/prisma.js';
 import { authenticateToken, requireAdmin } from '../middleware/auth.js';
-import megaService from '../services/megaService.js'; // ✅ IMPORT DIRETO
+import megaService from '../services/megaService.js';
 
 const router = express.Router();
 
-// ✅ MIDDLEWARES GLOBAIS CORRETOS
+// ✅ MIDDLEWARES GLOBAIS CORRETOS - APENAS PARA ROTAS ADMIN
 router.use(authenticateToken);
 router.use(requireAdmin);
 
@@ -42,11 +42,12 @@ router.get('/dashboard', async (req, res) => {
       }
     });
   } catch (error) {
+    console.error('Error fetching dashboard data:', error);
     res.status(500).json({ error: 'Failed to fetch dashboard data' });
   }
 });
 
-// Get MEGA files not in database - 🔥 CORREÇÃO COMPLETA
+// Get MEGA files not in database - 🔥 CORREÇÃO DEFINITIVA
 router.get('/mega-videos', async (req, res) => {
   try {
     console.log('🔐 Usuário autenticado para MEGA videos:', req.user.email);
@@ -56,17 +57,17 @@ router.get('/mega-videos', async (req, res) => {
     let megaFiles = [];
     
     try {
-      // Primeiro tenta na pasta específica
-      console.log('🔍 Buscando na pasta específica...');
-      megaFiles = await megaService.listVideosInFolder('Mega/seehere-videos');
-      
-      // Se não encontrar, busca em todas as pastas
-      if (megaFiles.length === 0) {
-        console.log('🔍 Nenhum vídeo na pasta específica, buscando em todas as pastas...');
-        megaFiles = await megaService.listAllVideoFilesRecursive();
-      }
+      // Tentar busca recursiva primeiro
+      console.log('🔍 Buscando vídeos recursivamente...');
+      megaFiles = await megaService.listAllVideoFilesRecursive();
       
       console.log(`📊 Total de arquivos encontrados: ${megaFiles.length}`);
+      
+      // Se não encontrar, tentar pasta específica
+      if (megaFiles.length === 0) {
+        console.log('🔍 Nenhum vídeo encontrado recursivamente, tentando pasta específica...');
+        megaFiles = await megaService.listVideosInFolder('Mega/seehere-videos');
+      }
       
     } catch (megaError) {
       console.error('❌ Erro ao buscar no MEGA:', megaError.message);
@@ -86,15 +87,7 @@ router.get('/mega-videos', async (req, res) => {
         });
       }
       
-      // Se for outro erro, tenta a busca recursiva como fallback
-      console.log('🔄 Tentando busca recursiva como fallback...');
-      try {
-        megaFiles = await megaService.listAllVideoFilesRecursive();
-        console.log(`📊 Fallback: ${megaFiles.length} arquivos encontrados`);
-      } catch (fallbackError) {
-        console.error('❌ Fallback também falhou:', fallbackError.message);
-        throw new Error(`Falha na conexão com MEGA: ${megaError.message}`);
-      }
+      throw new Error(`Falha na conexão com MEGA: ${megaError.message}`);
     }
     
     // Get all videos from database to check which ones are already imported
@@ -274,6 +267,7 @@ router.post('/videos', async (req, res) => {
 
     res.status(201).json({ video });
   } catch (error) {
+    console.error('Error creating video:', error);
     res.status(500).json({ error: 'Failed to create video' });
   }
 });
@@ -315,6 +309,7 @@ router.get('/videos', async (req, res) => {
       }
     });
   } catch (error) {
+    console.error('Error fetching videos:', error);
     res.status(500).json({ error: 'Failed to fetch videos' });
   }
 });
@@ -323,6 +318,7 @@ router.get('/videos', async (req, res) => {
 router.post('/collections', async (req, res) => {
   try {
     console.log('🔐 Usuário criando coleção:', req.user.email);
+    console.log('👤 Role do usuário:', req.user.role);
     
     const { name, description, thumbnailUrl, isFeatured } = req.body;
 
@@ -341,6 +337,9 @@ router.post('/collections', async (req, res) => {
       include: {
         createdBy: {
           select: { displayName: true }
+        },
+        _count: {
+          select: { videos: true, favorites: true }
         }
       }
     });
@@ -371,6 +370,7 @@ router.get('/collections', async (req, res) => {
 
     res.json({ collections });
   } catch (error) {
+    console.error('Error fetching collections:', error);
     res.status(500).json({ error: 'Failed to fetch collections' });
   }
 });

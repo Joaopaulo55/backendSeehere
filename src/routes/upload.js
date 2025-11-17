@@ -5,7 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import megaService from '../services/megaService.js';
 import { authenticateToken, requireAdmin } from '../middleware/auth.js';
-import { prisma } from '../lib/prisma.js'; // ✅ IMPORT DIRETO
+import { prisma } from '../lib/prisma.js';
 import fs from 'fs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -38,7 +38,7 @@ const upload = multer({
   }
 });
 
-// Upload de vídeo - 🔥 CORREÇÃO COMPLETA
+// 🔥 CORREÇÃO DEFINITIVA: Aplicar middlewares DENTRO da rota
 router.post('/video', 
   authenticateToken, 
   requireAdmin,
@@ -55,7 +55,6 @@ router.post('/video',
       const { title, description, tags, collectionId } = req.body;
       
       if (!title) {
-        // Limpar arquivo temporário
         fs.unlinkSync(req.file.path);
         return res.status(400).json({ error: 'Título é obrigatório' });
       }
@@ -70,7 +69,7 @@ router.post('/video',
 
       console.log('✅ Upload MEGA concluído, salvando no banco...');
 
-      // 2. Salvar no banco de dados - ✅ USA IMPORT DIRETO
+      // 2. Salvar no banco de dados
       const videoData = {
         title,
         description: description || '',

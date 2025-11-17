@@ -1,10 +1,11 @@
+// collections.js - VERSÃO COMPLETAMENTE CORRIGIDA
 import express from 'express';
 import { prisma } from '../lib/prisma.js';
-import { authenticateToken, requireAdmin } from '../middleware/auth.js'; // ✅ IMPORT CORRETO
+import { authenticateToken, requireAdmin } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Get all collections
+// Get all collections - PÚBLICO
 router.get('/', async (req, res) => {
   try {
     const { featured } = req.query;
@@ -34,9 +35,12 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Create collection - ✅ CORRIGIDO
+// Create collection - ✅ CORREÇÃO DEFINITIVA
 router.post('/', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    console.log('🔐 Usuário criando coleção:', req.user.email);
+    console.log('👤 Role do usuário:', req.user.role);
+    
     const { name, description, thumbnailUrl, isFeatured } = req.body;
 
     if (!name) {
@@ -61,14 +65,14 @@ router.post('/', authenticateToken, requireAdmin, async (req, res) => {
       }
     });
 
+    console.log('✅ Coleção criada com sucesso:', collection.id);
+
     res.status(201).json({ collection });
   } catch (error) {
     console.error('Error creating collection:', error);
     res.status(500).json({ error: 'Failed to create collection' });
   }
 });
-
-// ... resto do código permanece igual
 
 // Get single collection
 router.get('/:id', async (req, res) => {

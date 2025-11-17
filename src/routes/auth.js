@@ -1,3 +1,4 @@
+// auth.js - ROUTES CORRIGIDO
 import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -27,6 +28,7 @@ router.post('/signup', async (req, res) => {
         email,
         passwordHash,
         displayName: displayName || email.split('@')[0],
+        role: 'USER', // Definir role padrão
         preferences: {
           theme: 'system',
           notifications: true
@@ -43,6 +45,7 @@ router.post('/signup', async (req, res) => {
 
     res.status(201).json({ user, token });
   } catch (error) {
+    console.error('Error in signup:', error);
     res.status(500).json({ error: 'Failed to create user' });
   }
 });
@@ -77,11 +80,13 @@ router.post('/login', async (req, res) => {
         id: user.id,
         email: user.email,
         displayName: user.displayName,
-        role: user.role
+        role: user.role,
+        avatarUrl: user.avatarUrl
       },
       token
     });
   } catch (error) {
+    console.error('Error in login:', error);
     res.status(500).json({ error: 'Login failed' });
   }
 });
