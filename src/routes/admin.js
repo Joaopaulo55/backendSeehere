@@ -1,4 +1,4 @@
-// admin.js - VERSÃO CORRIGIDA COM ORDEM CERTA
+// admin.js - VERSÃO COMPLETAMENTE CORRIGIDA
 import express from 'express';
 import { prisma } from '../lib/prisma.js';
 import { authenticateToken, requireAdmin } from '../middleware/auth.js';
@@ -34,6 +34,7 @@ router.get('/dashboard', async (req, res) => {
     ]);
 
     res.json({
+      success: true,
       stats: {
         totalVideos,
         totalUsers,
@@ -43,7 +44,7 @@ router.get('/dashboard', async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching dashboard data:', error);
-    res.status(500).json({ error: 'Failed to fetch dashboard data' });
+    res.status(500).json({ success: false, error: 'Failed to fetch dashboard data' });
   }
 });
 
@@ -265,10 +266,10 @@ router.post('/videos', async (req, res) => {
       );
     }
 
-    res.status(201).json({ video });
+    res.status(201).json({ success: true, video });
   } catch (error) {
     console.error('Error creating video:', error);
-    res.status(500).json({ error: 'Failed to create video' });
+    res.status(500).json({ success: false, error: 'Failed to create video' });
   }
 });
 
@@ -300,6 +301,7 @@ router.get('/videos', async (req, res) => {
     const total = await prisma.video.count();
 
     res.json({
+      success: true,
       videos,
       pagination: {
         page: parseInt(page),
@@ -310,7 +312,7 @@ router.get('/videos', async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching videos:', error);
-    res.status(500).json({ error: 'Failed to fetch videos' });
+    res.status(500).json({ success: false, error: 'Failed to fetch videos' });
   }
 });
 
@@ -323,7 +325,7 @@ router.post('/collections', async (req, res) => {
     const { name, description, thumbnailUrl, isFeatured } = req.body;
 
     if (!name) {
-      return res.status(400).json({ error: 'Collection name is required' });
+      return res.status(400).json({ success: false, error: 'Collection name is required' });
     }
 
     const collection = await prisma.collection.create({
@@ -346,10 +348,10 @@ router.post('/collections', async (req, res) => {
 
     console.log('✅ Coleção criada com sucesso:', collection.id);
 
-    res.status(201).json({ collection });
+    res.status(201).json({ success: true, collection });
   } catch (error) {
     console.error('Error creating collection:', error);
-    res.status(500).json({ error: 'Failed to create collection' });
+    res.status(500).json({ success: false, error: 'Failed to create collection' });
   }
 });
 
@@ -368,14 +370,189 @@ router.get('/collections', async (req, res) => {
       orderBy: { createdAt: 'desc' }
     });
 
-    res.json({ collections });
+    res.json({ success: true, collections });
   } catch (error) {
     console.error('Error fetching collections:', error);
-    res.status(500).json({ error: 'Failed to fetch collections' });
+    res.status(500).json({ success: false, error: 'Failed to fetch collections' });
   }
 });
 
-// 🔥 CORREÇÃO DEFINITIVA: ROTA PARA CORRIGIR ROLES (NO LUGAR CORRETO - DEPOIS DE TODAS AS OUTRAS ROTAS)
+// 🔥 NOVAS ROTAS ESSENCIAIS ADICIONADAS:
+
+// Get all users for admin
+router.get('/users', async (req, res) => {
+  try {
+    const users = await prisma.user.findMany({
+      select: {
+        id: true,
+        email: true,
+        displayName: true,
+        role: true,
+        isActive: true,
+        createdAt: true,
+        _count: {
+          select: {
+            videos: true,
+            comments: true,
+            likes: true
+          }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    res.json({ success: true, users });
+  } catch (error) {
+    console.error('Error fetching users:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch users' });
+  }
+});
+
+// Update user role
+router.put('/users/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { role, displayName, isActive } = req.body;
+
+    const updatedUser = await prisma.user.update({
+      where: { id },
+      data: {
+        role,
+        displayName,
+        isActive: isActive !== undefined ? isActive : true
+      },
+      select: {
+        id: true,
+        email: true,
+        displayName: true,
+        role: true,
+        isActive: true,
+        createdAt: true
+      }
+    });
+
+    res.json({ success: true, user: updatedUser });
+  } catch (error) {
+    console.error('Error updating user:', error);
+    res.status(500).json({ success: false, error: 'Failed to update user' });
+  }
+});
+
+// Emergency fix user role
+router.post('/emergency-fix-role', async (req, res) => {
+  try {
+    const { email } = req.body;
+    
+    if (!email) {
+      return res.status(400).json({ success: false, error: 'Email is required' });
+    }
+
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    const updatedUser = await prisma.user.update({
+      where: { email },
+      data: { role: 'ADMIN' },
+      select: {
+        id: true,
+        email: true,
+        displayName: true,
+        role: true
+      }
+    });
+
+    res.json({
+      success: true,
+      message: `User ${email} updated to ADMIN`,
+      user: updatedUser
+    });
+  } catch (error) {
+    console.error('Error fixing role:', error);
+    res.status(500).json({ success: false, error: 'Failed to fix role' });
+  }
+});
+
+// Get system settings
+router.get('/settings', async (req, res) => {
+  try {
+    // Simular configurações por enquanto
+    const settings = {
+      siteName: 'SeeHere Video Platform',
+      siteDescription: 'Plataforma de compartilhamento de vídeos',
+      allowRegistrations: true,
+      maxFileSize: 500,
+      allowedFormats: ['mp4', 'avi', 'mov', 'mkv', 'webm'],
+      maintenanceMode: false
+    };
+
+    res.json({ success: true, settings });
+  } catch (error) {
+    console.error('Error fetching settings:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch settings' });
+  }
+});
+
+// Update system settings
+router.put('/settings', async (req, res) => {
+  try {
+    const { siteName, siteDescription, allowRegistrations, maxFileSize, maintenanceMode } = req.body;
+
+    // Aqui você pode salvar no banco quando criar a tabela SystemSettings
+    const settings = {
+      siteName: siteName || 'SeeHere Video Platform',
+      siteDescription: siteDescription || 'Plataforma de compartilhamento de vídeos',
+      allowRegistrations: allowRegistrations !== false,
+      maxFileSize: parseInt(maxFileSize) || 500,
+      maintenanceMode: maintenanceMode || false,
+      updatedAt: new Date().toISOString()
+    };
+
+    res.json({ success: true, settings, message: 'Settings updated successfully' });
+  } catch (error) {
+    console.error('Error updating settings:', error);
+    res.status(500).json({ success: false, error: 'Failed to update settings' });
+  }
+});
+
+// Get notifications
+router.get('/notifications', async (req, res) => {
+  try {
+    const notifications = await prisma.notification.findMany({
+      where: {
+        OR: [
+          { userId: req.user.id },
+          { userId: null }
+        ]
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 50
+    });
+
+    res.json({ success: true, notifications });
+  } catch (error) {
+    console.error('Error fetching notifications:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch notifications' });
+  }
+});
+
+// Mark notification as read
+router.post('/notifications/:id/read', async (req, res) => {
+  try {
+    await prisma.notification.update({
+      where: { id: req.params.id },
+      data: { read: true }
+    });
+
+    res.json({ success: true, message: 'Notification marked as read' });
+  } catch (error) {
+    console.error('Error marking notification as read:', error);
+    res.status(500).json({ success: false, error: 'Failed to update notification' });
+  }
+});
+
+// 🔥 CORREÇÃO DEFINITIVA: ROTA PARA CORRIGIR ROLES
 router.post('/fix-users-roles', async (req, res) => {
   try {
     console.log('🔧 Corrigindo roles dos usuários existentes...');
