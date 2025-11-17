@@ -1,4 +1,4 @@
-// megaService.js - VERSÃO COMPLETAMENTE CORRIGIDA
+// megaService.js - VERSÃO COMPLETA E CORRIGIDA
 import { Storage } from 'megajs';
 import fs from 'fs';
 import path from 'path';
@@ -15,40 +15,34 @@ class MegaService {
     this.isConnected = false;
     this.isBlocked = false;
     this.lastRequestTime = 0;
+    this.requestQueue = [];
+    this.processingQueue = false;
     
-    // 🔥 CORREÇÃO: Configurações muito mais conservadoras
+    // Configurações de rate limiting
     this.rateLimit = {
-      maxRequestsPerMinute: 5, // MUITO reduzido
-      minTimeBetweenRequests: 10000, // 10 segundos entre requests
-      retryDelay: 30000, // 30 segundos entre tentativas
-      maxRetries: 1, // Apenas 1 tentativa extra
-      connectionTimeout: 45000 // 45 segundos
+      maxRequestsPerMinute: 20,
+      minTimeBetweenRequests: 3000,
+      retryDelay: 10000,
+      maxRetries: 2,
+      connectionTimeout: 45000
     };
 
-    // 🔥 CORREÇÃO: Verificar credenciais mais cedo
     this.credentials = {
       email: process.env.MEGA_EMAIL || 'xhanckin@gmail.com',
       password: process.env.MEGA_PASSWORD || 'Xhackin@2025/500'
     };
 
-    // Validar credenciais imediatamente
-    if (!this.credentials.email || !this.credentials.password) {
-      console.error('❌ CREDENCIAIS MEGA NÃO CONFIGURADAS');
-      this.isBlocked = true;
-    }
-
     this.connectionAttempts = 0;
-    this.maxConnectionAttempts = 1; // Apenas 1 tentativa
+    this.maxConnectionAttempts = 3;
   }
 
-  // 🔥 CORREÇÃO: Método simplificado sem rate limiting complexo
+  // Método com rate limiting e queue melhorado
   async executeWithRateLimit(operation) {
     const now = Date.now();
     const timeSinceLastRequest = now - this.lastRequestTime;
     
     // Aguardar tempo mínimo entre requests
     if (timeSinceLastRequest < this.rateLimit.minTimeBetweenRequests) {
-      console.log(`⏳ Aguardando ${(this.rateLimit.minTimeBetweenRequests - timeSinceLastRequest)/1000}s...`);
       await new Promise(resolve => 
         setTimeout(resolve, this.rateLimit.minTimeBetweenRequests - timeSinceLastRequest)
       );
@@ -56,31 +50,38 @@ class MegaService {
 
     this.lastRequestTime = Date.now();
     
-    try {
-      if (this.isBlocked) {
-        throw new Error('Conta MEGA temporariamente bloqueada. Aguarde 1-6 horas.');
+    // Executar com retry logic
+    let lastError;
+    for (let attempt = 1; attempt <= this.rateLimit.maxRetries; attempt++) {
+      try {
+        if (this.isBlocked) {
+          throw new Error('Conta MEGA temporariamente bloqueada');
+        }
+        
+        const result = await operation();
+        return result;
+        
+      } catch (error) {
+        lastError = error;
+        console.warn(`⚠️ Tentativa ${attempt}/${this.rateLimit.maxRetries} falhou:`, error.message);
+        
+        // Verificar se é bloqueio permanente
+        if (error.message.includes('EBLOCKED') || error.message.includes('blocked')) {
+          this.isBlocked = true;
+          console.error('🚫 Conta MEGA bloqueada. Aguarde algumas horas.');
+          break;
+        }
+        
+        // Aguardar antes da próxima tentativa
+        if (attempt < this.rateLimit.maxRetries) {
+          const delay = this.rateLimit.retryDelay * Math.pow(2, attempt - 1);
+          console.log(`⏳ Aguardando ${delay/1000} segundos antes da próxima tentativa...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
       }
-      
-      console.log(`🔗 Executando operação MEGA...`);
-      const result = await operation();
-      return result;
-      
-    } catch (error) {
-      console.error(`❌ Erro MEGA:`, error.message);
-      
-      // 🔥 CORREÇÃO: Detectar melhor os tipos de erro
-      if (error.message.includes('ESID') || 
-          error.message.includes('session') || 
-          error.message.includes('relogin') ||
-          error.message.includes('EBLOCKED') ||
-          error.message.includes('blocked')) {
-        this.isBlocked = true;
-        console.error('🚫 CONTA MEGA BLOQUEADA - Sessão inválida/expirada');
-        console.error('💡 SOLUÇÃO: Aguarde 1-6 horas ou use credenciais diferentes');
-      }
-      
-      throw error;
     }
+    
+    throw lastError;
   }
 
   async connect() {
@@ -92,82 +93,88 @@ class MegaService {
 
     return this.executeWithRateLimit(async () => {
       try {
-        console.log(`🔗 Tentativa de conexão MEGA (${this.connectionAttempts}/${this.maxConnectionAttempts})...`);
+        console.log(`🔗 Tentativa ${this.connectionAttempts}/${this.maxConnectionAttempts} - Conectando ao MEGA.nz...`);
         
-        // 🔥 CORREÇÃO: Validar formato do email
-        if (!this.credentials.email || !this.credentials.email.includes('@')) {
-          throw new Error('Email MEGA inválido');
+        if (!this.credentials.email || !this.credentials.password) {
+          throw new Error('Credenciais MEGA não configuradas');
         }
 
-        if (!this.credentials.password || this.credentials.password.length < 6) {
-          throw new Error('Senha MEGA muito curta');
-        }
-
-        // Limpar conexão anterior
+        // Limpar conexão anterior se existir
         if (this.storage) {
           try {
             this.storage.close();
           } catch (e) {
-            console.log('🔄 Conexão anterior fechada');
+            // Ignorar erros ao fechar conexão anterior
           }
           this.storage = null;
         }
 
-        // 🔥 CORREÇÃO: Configurações MEGA mais compatíveis
+        // Criar nova instância do storage
         this.storage = new Storage({
           email: this.credentials.email,
           password: this.credentials.password,
-          autologin: false,
-          keepalive: false,
+          autologin: true,
+          keepalive: true,
           timeout: this.rateLimit.connectionTimeout
         });
 
-        // Conexão simplificada
-        return new Promise((resolve, reject) => {
+        // Aguardar conexão com timeout
+        const connectionPromise = new Promise((resolve, reject) => {
           const timeout = setTimeout(() => {
-            reject(new Error(`Timeout na conexão MEGA (${this.rateLimit.connectionTimeout/1000}s)`));
+            reject(new Error(`Timeout na conexão com MEGA após ${this.rateLimit.connectionTimeout/1000} segundos`));
           }, this.rateLimit.connectionTimeout);
 
-          this.storage.once('ready', () => {
+          const readyHandler = () => {
             clearTimeout(timeout);
+            this.storage.off('error', errorHandler);
             this.isConnected = true;
             this.isBlocked = false;
             this.connectionAttempts = 0;
             console.log('✅ Conectado ao MEGA.nz com sucesso!');
-            
-            // 🔥 CORREÇÃO: Log de informações da conta
-            if (this.storage.usedSpace !== undefined) {
-              console.log(`📊 Espaço usado: ${this.formatBytes(this.storage.usedSpace)}`);
-              console.log(`💾 Espaço total: ${this.formatBytes(this.storage.totalSpace)}`);
+            if (this.storage.usedSpace !== undefined && this.storage.totalSpace !== undefined) {
+              console.log(`📁 Espaço usado: ${this.formatBytes(this.storage.usedSpace)}`);
+              console.log(`📊 Espaço total: ${this.formatBytes(this.storage.totalSpace)}`);
             }
-            
-            resolve(true);
-          });
+            resolve();
+          };
 
-          this.storage.once('error', (error) => {
+          const errorHandler = (error) => {
             clearTimeout(timeout);
-            console.error('❌ Erro de conexão MEGA:', error.message);
+            this.storage.off('ready', readyHandler);
+            console.error('❌ Erro na conexão MEGA:', error.message);
             
-            // 🔥 CORREÇÃO: Melhor detecção de erros
-            if (error.message.includes('ESID') || error.message.includes('session')) {
+            if (error.message.includes('blocked') || error.message.includes('EBLOCKED')) {
               this.isBlocked = true;
-              reject(new Error('Sessão MEGA inválida/expirada. Credenciais incorretas ou conta bloqueada.'));
+              reject(new Error('Conta MEGA bloqueada. Aguarde algumas horas.'));
             } else if (error.message.includes('credentials') || error.message.includes('login')) {
-              reject(new Error('Credenciais MEGA inválidas - verifique email/senha'));
-            } else if (error.message.includes('blocked') || error.message.includes('EBLOCKED')) {
-              this.isBlocked = true;
-              reject(new Error('Conta MEGA temporariamente bloqueada. Aguarde 1-6 horas.'));
+              reject(new Error('Credenciais MEGA inválidas'));
             } else {
               reject(error);
             }
-          });
+          };
+
+          this.storage.once('ready', readyHandler);
+          this.storage.once('error', errorHandler);
         });
+
+        await connectionPromise;
+        return true;
 
       } catch (error) {
         console.error('❌ Falha na conexão com MEGA:', error.message);
         this.isConnected = false;
         
-        // 🔥 CORREÇÃO: Não tentar reconectar automaticamente
+        if (error.message.includes('blocked') || error.message.includes('EBLOCKED')) {
+          this.isBlocked = true;
+        }
+        
+        // Se não for bloqueio, tentar novamente
+        if (!this.isBlocked && this.connectionAttempts < this.maxConnectionAttempts) {
+          console.log(`🔄 Nova tentativa de conexão em ${this.rateLimit.retryDelay/1000} segundos...`);
+          await new Promise(resolve => setTimeout(resolve, this.rateLimit.retryDelay));
+          return this.connect();
+        }
+        
         throw error;
       }
     });
@@ -175,130 +182,104 @@ class MegaService {
 
   async ensureConnection() {
     if (this.isBlocked) {
-      throw new Error('Conta MEGA bloqueada. Aguarde 1-6 horas ou use credenciais diferentes.');
+      throw new Error('Conta MEGA temporariamente bloqueada. Tente novamente mais tarde.');
     }
     
     if (!this.isConnected || !this.storage) {
       await this.connect();
+    } else {
+      // Verificar se a conexão ainda está ativa
+      try {
+        if (this.storage.root && typeof this.storage.root === 'object') {
+          return; // Conexão parece estar ok
+        }
+      } catch (error) {
+        console.warn('⚠️ Conexão MEGA pode estar inativa, reconectando...');
+        this.isConnected = false;
+        await this.connect();
+      }
     }
-    
-    return true;
   }
 
-  // 🔥 CORREÇÃO: Busca MEGA simplificada - apenas pasta específica
+  // ========== FUNÇÃO QUE BUSCA EM TODAS AS PASTAS ==========
   async listAllVideoFilesRecursive() {
     return this.executeWithRateLimit(async () => {
       try {
         await this.ensureConnection();
         
-        console.log('🔍 Buscando vídeos no MEGA (modo seguro)...');
+        console.log('🔍 Buscando TODOS os arquivos de vídeo no MEGA (recursivo)...');
         
-        // 🔥 CORREÇÃO: Tentar apenas pastas específicas primeiro
-        const foldersToTry = [
-          'Videos',
-          'videos', 
-          'Vídeos',
-          'seehere-videos',
-          'Mega/seehere-videos',
-          'root/Videos'
-        ];
+        const allVideoFiles = [];
         
-        let megaFiles = [];
-        
-        for (const folder of foldersToTry) {
-          console.log(`🔍 Tentando pasta: ${folder}`);
+        // Função recursiva para buscar em TODAS as pastas
+        const searchInFolder = async (folder, currentPath = 'root') => {
           try {
-            const files = await this.listVideosInFolder(folder);
-            if (files.length > 0) {
-              console.log(`✅ Encontrados ${files.length} vídeos em ${folder}`);
-              megaFiles = files;
-              break;
+            // Listar conteúdo da pasta atual
+            const children = await new Promise((resolve, reject) => {
+              folder.children((error, children) => {
+                if (error) reject(error);
+                else resolve(children || []);
+              });
+            });
+            
+            for (const item of children) {
+              if (item.directory) {
+                // É uma pasta - buscar recursivamente
+                const folderPath = `${currentPath}/${item.name}`;
+                console.log(`📁 Buscando na pasta: ${folderPath}`);
+                await searchInFolder(item, folderPath);
+              } else {
+                // É um arquivo - verificar se é vídeo
+                const fileName = item.name || '';
+                const isVideo = /\.(mp4|avi|mov|mkv|wmv|flv|webm|m4v|3gp|mpeg|mpg)$/i.test(fileName);
+                
+                if (isVideo && item.size > 0) {
+                  allVideoFiles.push({
+                    name: item.name,
+                    size: item.size,
+                    formattedSize: this.formatBytes(item.size),
+                    downloadId: item.downloadId,
+                    nodeId: item.nodeId,
+                    downloadUrl: null,
+                    timestamp: item.timestamp || Date.now(),
+                    isInDatabase: false,
+                    path: currentPath
+                  });
+                  
+                  console.log(`🎬 Encontrado vídeo: ${item.name} em ${currentPath}`);
+                }
+              }
             }
           } catch (error) {
-            console.log(`📁 Pasta ${folder} não encontrada ou sem vídeos`);
+            console.error(`❌ Erro ao buscar na pasta ${currentPath}:`, error.message);
           }
-        }
+        };
         
-        // Se não encontrou em pastas específicas, tentar busca limitada
-        if (megaFiles.length === 0) {
-          console.log('🔍 Buscando vídeos em toda a conta (limitado)...');
-          megaFiles = await this.safeRecursiveSearch();
-        }
+        // Começar busca a partir da pasta raiz
+        await searchInFolder(this.storage.root);
         
-        console.log(`✅ Total de vídeos encontrados: ${megaFiles.length}`);
-        return megaFiles;
+        console.log(`✅ Encontrados ${allVideoFiles.length} arquivos de vídeo em TODAS as pastas do MEGA`);
+        return allVideoFiles;
         
       } catch (error) {
-        console.error('❌ Erro na busca de vídeos:', error.message);
+        console.error('❌ Erro ao listar arquivos de vídeo recursivamente:', error.message);
         return [];
       }
     });
   }
 
-  // 🔥 CORREÇÃO: Busca recursiva segura e limitada
-  async safeRecursiveSearch(maxFolders = 10) {
-    const allVideoFiles = [];
-    let foldersScanned = 0;
-    
-    const searchInFolder = async (folder, currentPath = 'root', depth = 0) => {
-      if (foldersScanned >= maxFolders || depth > 3) {
-        return; // Limitar para evitar timeout
-      }
-      
-      try {
-        const children = await new Promise((resolve, reject) => {
-          folder.children((error, children) => {
-            if (error) reject(error);
-            else resolve(children || []);
-          });
-        });
-        
-        for (const item of children) {
-          if (item.directory) {
-            foldersScanned++;
-            if (foldersScanned < maxFolders) {
-              await searchInFolder(item, `${currentPath}/${item.name}`, depth + 1);
-            }
-          } else {
-            const fileName = item.name || '';
-            const isVideo = /\.(mp4|avi|mov|mkv|wmv|flv|webm|m4v|3gp|mpeg|mpg)$/i.test(fileName);
-            
-            if (isVideo && item.size > 0) {
-              allVideoFiles.push({
-                name: item.name,
-                size: item.size,
-                formattedSize: this.formatBytes(item.size),
-                downloadId: item.downloadId,
-                nodeId: item.nodeId,
-                downloadUrl: null,
-                timestamp: item.timestamp || Date.now(),
-                isInDatabase: false,
-                path: currentPath
-              });
-            }
-          }
-        }
-      } catch (error) {
-        console.warn(`⚠️ Erro na pasta ${currentPath}:`, error.message);
-      }
-    };
-    
-    await searchInFolder(this.storage.root);
-    return allVideoFiles;
-  }
-
-  // BUSCA EM PASTA ESPECÍFICA (mantida)
-  async listVideosInFolder(folderPath = 'Videos') {
+  // FUNÇÃO QUE BUSCA EM PASTA ESPECÍFICA
+  async listVideosInFolder(folderPath = 'Mega/seehere-videos') {
     return this.executeWithRateLimit(async () => {
       try {
         await this.ensureConnection();
         
-        console.log(`🔍 Buscando vídeos em: ${folderPath}`);
+        console.log(`🔍 Buscando vídeos na pasta: ${folderPath}`);
         
+        // Navegar para a pasta específica
         let currentFolder = this.storage.root;
         const pathParts = folderPath.split('/').filter(part => part.trim());
         
-        // Navegar para a pasta
         for (const part of pathParts) {
           const children = await new Promise((resolve, reject) => {
             currentFolder.children((error, children) => {
@@ -312,14 +293,14 @@ class MegaService {
           );
           
           if (!nextFolder) {
-            console.log(`📁 Pasta não encontrada: ${part}`);
-            return [];
+            console.log(`❌ Pasta não encontrada: ${part} em ${folderPath}`);
+            return []; // Retorna array vazio se pasta não existe
           }
           
           currentFolder = nextFolder;
         }
         
-        // Listar arquivos na pasta
+        // Listar arquivos de vídeo na pasta encontrada
         const children = await new Promise((resolve, reject) => {
           currentFolder.children((error, children) => {
             if (error) reject(error);
@@ -350,114 +331,16 @@ class MegaService {
         return videoFiles;
         
       } catch (error) {
-        console.error(`❌ Erro ao buscar em ${folderPath}:`, error.message);
+        console.error(`❌ Erro ao buscar vídeos em ${folderPath}:`, error.message);
         return [];
       }
     });
   }
 
-  // 🔥 CORREÇÃO: Health check mais informativo
-  async healthCheck() {
-    try {
-      // Teste de conexão básico
-      await this.ensureConnection();
-      const storageInfo = await this.getStorageInfo();
-      
-      return {
-        status: 'healthy',
-        mega: {
-          connected: true,
-          blocked: false,
-          account: this.credentials.email,
-          storage: storageInfo
-        },
-        timestamp: new Date().toISOString()
-      };
-    } catch (error) {
-      let status = 'unhealthy';
-      let message = error.message;
-      
-      if (error.message.includes('blocked') || error.message.includes('ESID') || this.isBlocked) {
-        status = 'blocked';
-        message = 'Conta MEGA bloqueada - Sessão expirada/inválida';
-      } else if (error.message.includes('credentials')) {
-        status = 'invalid_credentials';
-        message = 'Credenciais MEGA inválidas';
-      }
-      
-      return {
-        status: status,
-        mega: {
-          connected: false,
-          blocked: this.isBlocked,
-          error: message,
-          account: this.credentials.email
-        },
-        timestamp: new Date().toISOString(),
-        solution: 'Verifique credenciais ou aguarde desbloqueio automático (1-6 horas)'
-      };
-    }
+  // FUNÇÃO ORIGINAL ATUALIZADA - AGORA USA A BUSCA RECURSIVA
+  async listAllVideoFiles() {
+    return await this.listAllVideoFilesRecursive();
   }
-
-  // 🔥 NOVO: Método para testar credenciais sem operações complexas
-  async testCredentials() {
-    try {
-      console.log('🧪 Testando credenciais MEGA...');
-      
-      if (!this.credentials.email || !this.credentials.password) {
-        return {
-          valid: false,
-          error: 'Credenciais não fornecidas'
-        };
-      }
-      
-      // Tentar conexão simples
-      await this.connect();
-      
-      return {
-        valid: true,
-        account: this.credentials.email,
-        storage: await this.getStorageInfo()
-      };
-    } catch (error) {
-      return {
-        valid: false,
-        error: error.message,
-        account: this.credentials.email
-      };
-    }
-  }
-
-  // Manter outros métodos como estão, mas com tratamento de erro melhorado
-  async getStorageInfo() {
-    try {
-      if (!this.isConnected) {
-        throw new Error('Não conectado ao MEGA');
-      }
-
-      return {
-        usedSpace: this.storage.usedSpace || 0,
-        totalSpace: this.storage.totalSpace || 0,
-        freeSpace: (this.storage.totalSpace || 0) - (this.storage.usedSpace || 0),
-        usedPercentage: this.storage.usedSpace && this.storage.totalSpace ? 
-          ((this.storage.usedSpace / this.storage.totalSpace) * 100).toFixed(2) : '0',
-        isConnected: this.isConnected,
-        account: this.credentials.email
-      };
-    } catch (error) {
-      console.error('❌ Erro ao buscar info storage:', error.message);
-      return {
-        usedSpace: 0,
-        totalSpace: 0,
-        freeSpace: 0,
-        usedPercentage: '0',
-        isConnected: false,
-        error: error.message
-      };
-    }
-  }
-
-  // Manter outros métodos (uploadFile, generatePublicLink, etc) como na versão anterior
 
   async uploadFile(filePath, fileName, options = {}) {
     return this.executeWithRateLimit(async () => {
@@ -466,41 +349,49 @@ class MegaService {
 
         console.log(`📤 Iniciando upload: ${fileName}`);
         
-        // Verificar arquivo
+        // Verificar se arquivo existe
         try {
           await fs.promises.access(filePath);
         } catch (error) {
           throw new Error(`Arquivo não encontrado: ${filePath}`);
         }
         
+        // Obter stats do arquivo
         const stats = await fs.promises.stat(filePath);
-        console.log(`📊 Tamanho: ${this.formatBytes(stats.size)}`);
+        console.log(`📊 Tamanho do arquivo: ${this.formatBytes(stats.size)}`);
         
-        // Ler arquivo
+        // Ler arquivo do sistema de arquivos
         const fileBuffer = await readFile(filePath);
         
         // Fazer upload
         const uploadedFile = await new Promise((resolve, reject) => {
-          this.storage.upload(fileName, fileBuffer, (error, file) => {
+          const upload = this.storage.upload(fileName, fileBuffer, (error, file) => {
             if (error) {
               reject(error);
             } else {
               resolve(file);
             }
           });
+
+          // Listener de progresso
+          upload.on('progress', (info) => {
+            const percent = ((info.bytesLoaded / info.bytesTotal) * 100).toFixed(1);
+            console.log(`📤 Upload progresso: ${percent}%`);
+          });
         });
 
-        console.log(`✅ Upload concluído: ${uploadedFile.name}`);
-        
-        // Gerar link
+        console.log(`✅ Upload concluído: ${uploadedFile.name} (${this.formatBytes(uploadedFile.size)})`);
+
+        // Gerar link público
         const downloadUrl = await this.generatePublicLink(uploadedFile);
         
-        // Limpar arquivo temporário
+        // Limpar arquivo temporário se solicitado
         if (options.cleanup !== false) {
           try {
             await unlink(filePath);
+            console.log(`🧹 Arquivo temporário removido: ${filePath}`);
           } catch (cleanupError) {
-            console.warn('⚠️ Não foi possível limpar arquivo temporário');
+            console.warn('⚠️ Não foi possível remover arquivo temporário:', cleanupError.message);
           }
         }
 
@@ -508,12 +399,14 @@ class MegaService {
           fileId: uploadedFile.downloadId,
           downloadUrl: downloadUrl,
           size: uploadedFile.size,
-          name: uploadedFile.name
+          name: uploadedFile.name,
+          timestamp: new Date().toISOString(),
+          megaNode: uploadedFile.nodeId
         };
 
       } catch (error) {
-        console.error(`❌ Erro no upload:`, error.message);
-        throw error;
+        console.error(`❌ Erro no upload de ${fileName}:`, error.message);
+        throw new Error(`Falha no upload: ${error.message}`);
       }
     });
   }
@@ -531,10 +424,36 @@ class MegaService {
           });
         });
 
+        console.log(`🔗 Link gerado: ${link}`);
         return link;
 
       } catch (error) {
-        console.error('❌ Erro ao gerar link:', error.message);
+        console.error('❌ Erro ao gerar link público:', error.message);
+        throw new Error(`Não foi possível gerar link público: ${error.message}`);
+      }
+    });
+  }
+
+  async createFolder(folderName) {
+    return this.executeWithRateLimit(async () => {
+      try {
+        await this.ensureConnection();
+
+        const folder = await new Promise((resolve, reject) => {
+          this.storage.mkdir(folderName, (error, folder) => {
+            if (error) {
+              reject(error);
+            } else {
+              resolve(folder);
+            }
+          });
+        });
+
+        console.log(`📁 Pasta criada: ${folderName}`);
+        return folder;
+
+      } catch (error) {
+        console.error(`❌ Erro ao criar pasta ${folderName}:`, error.message);
         throw error;
       }
     });
@@ -557,12 +476,179 @@ class MegaService {
         return downloadUrl;
 
       } catch (error) {
-        console.error(`❌ Erro ao buscar link:`, error.message);
+        console.error(`❌ Erro ao gerar link para ${fileId}:`, error.message);
+        
+        if (error.message.includes('blocked') || error.message.includes('EBLOCKED')) {
+          this.isBlocked = true;
+        }
+        
+        throw error;
+      }
+    });
+  }
+  
+  async listFiles() {
+    return this.executeWithRateLimit(async () => {
+      try {
+        await this.ensureConnection();
+        
+        console.log('🔍 Listando arquivos do MEGA...');
+        
+        if (this.storage.files && Array.isArray(this.storage.files)) {
+          const files = this.storage.files.slice(0, 50).map(file => ({
+            name: file.name || `file_${file.nodeId}`,
+            size: file.size || 0,
+            type: 'file',
+            downloadId: file.downloadId,
+            nodeId: file.nodeId,
+            timestamp: file.timestamp || Date.now()
+          }));
+          
+          console.log(`✅ Encontrados ${files.length} arquivos`);
+          return files;
+        } else {
+          console.log('📁 Nenhum arquivo encontrado');
+          return [];
+        }
+        
+      } catch (error) {
+        console.error('❌ Erro ao listar arquivos:', error.message);
+        
+        if (error.message.includes('blocked') || error.message.includes('EBLOCKED')) {
+          this.isBlocked = true;
+        }
+        
+        return [];
+      }
+    });
+  }
+
+  async deleteFile(fileId) {
+    return this.executeWithRateLimit(async () => {
+      try {
+        await this.ensureConnection();
+
+        const file = this.storage.files.find(f => f.downloadId === fileId || f.nodeId === fileId);
+        
+        if (!file) {
+          throw new Error(`Arquivo não encontrado: ${fileId}`);
+        }
+
+        await new Promise((resolve, reject) => {
+          file.delete(true, (error) => {
+            if (error) {
+              reject(error);
+            } else {
+              resolve();
+            }
+          });
+        });
+
+        console.log(`🗑️ Arquivo deletado: ${file.name} (${fileId})`);
+        return true;
+
+      } catch (error) {
+        console.error(`❌ Erro ao deletar arquivo ${fileId}:`, error.message);
         throw error;
       }
     });
   }
 
+  async getFileInfo(fileId) {
+    return this.executeWithRateLimit(async () => {
+      try {
+        await this.ensureConnection();
+
+        const file = this.storage.files.find(f => f.downloadId === fileId || f.nodeId === fileId);
+        
+        if (!file) {
+          throw new Error(`Arquivo não encontrado: ${fileId}`);
+        }
+
+        const downloadUrl = await this.generatePublicLink(file);
+
+        return {
+          fileId: file.downloadId,
+          nodeId: file.nodeId,
+          name: file.name,
+          size: file.size,
+          downloadUrl: downloadUrl,
+          timestamp: file.timestamp,
+          attributes: file.attributes
+        };
+
+      } catch (error) {
+        console.error(`❌ Erro ao buscar info do arquivo ${fileId}:`, error.message);
+        throw error;
+      }
+    });
+  }
+
+  async getStorageInfo() {
+    return this.executeWithRateLimit(async () => {
+      try {
+        await this.ensureConnection();
+
+        return {
+          usedSpace: this.storage.usedSpace,
+          totalSpace: this.storage.totalSpace,
+          freeSpace: this.storage.totalSpace - this.storage.usedSpace,
+          usedPercentage: ((this.storage.usedSpace / this.storage.totalSpace) * 100).toFixed(2),
+          isConnected: this.isConnected,
+          account: this.credentials.email
+        };
+
+      } catch (error) {
+        console.error('❌ Erro ao buscar info do storage:', error.message);
+        throw error;
+      }
+    });
+  }
+
+  // Método para verificar status da conta
+  async checkAccountStatus() {
+    try {
+      await this.ensureConnection();
+      const storageInfo = await this.getStorageInfo();
+      
+      return {
+        status: 'active',
+        isBlocked: false,
+        storage: storageInfo,
+        canUpload: true
+      };
+    } catch (error) {
+      if (error.message.includes('blocked') || this.isBlocked) {
+        return {
+          status: 'blocked',
+          isBlocked: true,
+          message: 'Conta temporariamente bloqueada. Aguarde algumas horas.',
+          canUpload: false
+        };
+      }
+      
+      return {
+        status: 'error',
+        isBlocked: false,
+        message: error.message,
+        canUpload: false
+      };
+    }
+  }
+
+  async disconnect() {
+    if (this.storage) {
+      try {
+        this.storage.close();
+        this.isConnected = false;
+        console.log('🔌 Desconectado do MEGA.nz');
+      } catch (error) {
+        console.error('❌ Erro ao desconectar:', error.message);
+      }
+    }
+  }
+
+  // Utilitários
   formatBytes(bytes, decimals = 2) {
     if (bytes === 0) return '0 Bytes';
     
@@ -575,20 +661,70 @@ class MegaService {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
   }
 
-  async disconnect() {
+  // Health check
+  async healthCheck() {
+    try {
+      const accountStatus = await this.checkAccountStatus();
+      const storageInfo = accountStatus.isBlocked ? null : await this.getStorageInfo();
+      
+      return {
+        status: accountStatus.isBlocked ? 'blocked' : 'healthy',
+        mega: {
+          connected: !accountStatus.isBlocked,
+          blocked: accountStatus.isBlocked,
+          account: this.credentials.email,
+          storage: storageInfo,
+          message: accountStatus.message
+        },
+        timestamp: new Date().toISOString()
+      };
+    } catch (error) {
+      return {
+        status: 'unhealthy',
+        mega: {
+          connected: false,
+          blocked: this.isBlocked,
+          error: error.message
+        },
+        timestamp: new Date().toISOString()
+      };
+    }
+  }
+
+  // Método para resetar conexão
+  async resetConnection() {
+    console.log('🔄 Resetando conexão MEGA...');
+    this.isConnected = false;
+    this.isBlocked = false;
+    this.connectionAttempts = 0;
+    
     if (this.storage) {
       try {
         this.storage.close();
-        this.isConnected = false;
-        console.log('🔌 Desconectado do MEGA');
       } catch (error) {
-        console.error('❌ Erro ao desconectar:', error.message);
+        // Ignorar erros ao fechar
       }
+      this.storage = null;
     }
+    
+    return this.connect();
   }
 }
 
-// Singleton
+// Criar instância única (Singleton)
 const megaService = new MegaService();
+
+// Graceful shutdown
+process.on('SIGINT', async () => {
+  console.log('🔄 Desconectando do MEGA...');
+  await megaService.disconnect();
+  process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+  console.log('🔄 Desconectando do MEGA...');
+  await megaService.disconnect();
+  process.exit(0);
+});
 
 export default megaService;
