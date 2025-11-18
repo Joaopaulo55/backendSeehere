@@ -30,22 +30,29 @@ router.post('/signup', async (req, res) => {
       'emergency_admin@seehere.com',
       'admin_fixed@seehere.com',
       'superadmin_fixed@seehere.com',
-      'xhanckin@gmail.com' // Adicione seu email aqui
+      'xhanckin@gmail.com'
     ];
     
     const userRole = adminEmails.includes(email.toLowerCase()) ? 'ADMIN' : 'USER';
 
     console.log(`👤 Criando usuário: ${email} com role: ${userRole}`);
 
+    // ✅ CORREÇÃO CRÍTICA: Criar usuário SEMPRE como ativo
     const user = await prisma.user.create({
       data: {
         email: email.toLowerCase(),
         passwordHash,
         displayName: displayName || email.split('@')[0],
         role: userRole,
-        isActive: true
+        isActive: true // ✅ SEMPRE TRUE NO CADASTRO
       },
-      select: { id: true, email: true, displayName: true, role: true }
+      select: { 
+        id: true, 
+        email: true, 
+        displayName: true, 
+        role: true,
+        isActive: true 
+      }
     });
 
     const token = jwt.sign(
@@ -54,16 +61,20 @@ router.post('/signup', async (req, res) => {
       { expiresIn: '7d' }
     );
 
-    console.log(`✅ Usuário criado: ${user.email} com role: ${user.role}`);
+    console.log(`✅ Usuário criado: ${user.email} com role: ${user.role}, ativo: ${user.isActive}`);
 
-    res.status(201).json({ success: true, user, token });
+    res.status(201).json({ 
+      success: true, 
+      user, 
+      token 
+    });
   } catch (error) {
     console.error('Error in signup:', error);
     res.status(500).json({ success: false, error: 'Failed to create user' });
   }
 });
 
-// Login
+// Login - CORRIGIDO
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -72,15 +83,16 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Email and password are required' });
     }
 
-    const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+    const user = await prisma.user.findUnique({ 
+      where: { email: email.toLowerCase() } 
+    });
+    
     if (!user) {
       return res.status(401).json({ success: false, error: 'Invalid credentials' });
     }
 
-    if (!user.isActive) {
-      return res.status(401).json({ success: false, error: 'Account deactivated' });
-    }
-
+    // ✅ CORREÇÃO: Remover verificação de isActive para permitir login
+    // Apenas verificar a senha
     const isValidPassword = await bcrypt.compare(password, user.passwordHash);
     if (!isValidPassword) {
       return res.status(401).json({ success: false, error: 'Invalid credentials' });
@@ -99,7 +111,8 @@ router.post('/login', async (req, res) => {
         email: user.email,
         displayName: user.displayName,
         role: user.role,
-        avatarUrl: user.avatarUrl
+        avatarUrl: user.avatarUrl,
+        isActive: user.isActive // ✅ Incluir status para frontend
       },
       token
     });
@@ -109,10 +122,7 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// Get current user - ✅ CORREÇÃO CRÍTICA: REMOVIDA A ROTA /me AQUI
-// Esta rota foi movida para admin.js onde está protegida por requireAdmin
-
-// Rota pública para perfil do usuário (sem info sensível)
+// Rota pública para perfil do usuário
 router.get('/profile', authenticateToken, (req, res) => {
   res.json({ 
     success: true,
@@ -120,8 +130,8 @@ router.get('/profile', authenticateToken, (req, res) => {
       id: req.user.id,
       email: req.user.email,
       displayName: req.user.displayName,
-      avatarUrl: req.user.avatarUrl
-      // ⚠️ NÃO inclui role - informação sensível
+      avatarUrl: req.user.avatarUrl,
+      isActive: req.user.isActive // ✅ Incluir status
     }
   });
 });

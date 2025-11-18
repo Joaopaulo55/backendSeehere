@@ -1,4 +1,4 @@
-// auth.js - MIDDLEWARE CORRIGIDO E MELHORADO
+// auth.js - MIDDLEWARE CORRIGIDO
 import jwt from 'jsonwebtoken';
 import { prisma } from '../lib/prisma.js';
 
@@ -7,13 +7,11 @@ export const authenticateToken = async (req, res, next) => {
   const token = authHeader && authHeader.split(' ')[1];
 
   if (!token) {
-    console.log('❌ Token não fornecido');
     return res.status(401).json({ error: 'Access token required' });
   }
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret');
-    console.log('🔐 Token decodificado para userId:', decoded.userId);
     
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
@@ -22,20 +20,25 @@ export const authenticateToken = async (req, res, next) => {
         email: true, 
         displayName: true, 
         role: true,
-        avatarUrl: true 
+        avatarUrl: true,
+        isActive: true // ✅ ADICIONADO
       }
     });
 
     if (!user) {
-      console.log('❌ Usuário não encontrado no banco');
       return res.status(401).json({ error: 'User not found' });
     }
 
-    console.log('✅ Usuário autenticado:', user.email, 'Role:', user.role);
+    // ✅ VERIFICAÇÃO CORRIGIDA: Permitir login mesmo se isActive for false/null
+    if (user.isActive === false) {
+      console.log('⚠️ Usuário desativado tentando acessar:', user.email);
+      // Não bloqueamos aqui, apenas registramos
+    }
+
     req.user = user;
     next();
   } catch (error) {
-    console.error('❌ Token verification error:', error.message);
+    console.error('Token verification error:', error.message);
     
     if (error.name === 'TokenExpiredError') {
       return res.status(401).json({ error: 'Token expired' });
@@ -50,17 +53,19 @@ export const authenticateToken = async (req, res, next) => {
 };
 
 export const requireAdmin = (req, res, next) => {
-  console.log('🔐 Verificando permissões admin para:', req.user?.email);
-  console.log('👤 Role do usuário:', req.user?.role);
-  
   if (!req.user) {
-    console.log('❌ Usuário não autenticado');
     return res.status(401).json({ error: 'Authentication required' });
   }
   
-  // 🔥 CORREÇÃO: Verificar se o usuário é ADMIN ou EDITOR
+  // ✅ CORREÇÃO: Verificar se usuário está ativo
+  if (req.user.isActive === false) {
+    return res.status(403).json({ 
+      error: 'Account deactivated',
+      userRole: req.user.role
+    });
+  }
+  
   if (req.user.role !== 'ADMIN' && req.user.role !== 'EDITOR') {
-    console.log('❌ Acesso negado: usuário não é ADMIN ou EDITOR');
     return res.status(403).json({ 
       error: 'Admin access required',
       userRole: req.user.role,
@@ -68,6 +73,5 @@ export const requireAdmin = (req, res, next) => {
     });
   }
   
-  console.log('✅ Acesso admin permitido');
   next();
 };
