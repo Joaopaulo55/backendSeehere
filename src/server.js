@@ -12,6 +12,10 @@ import videoRoutes from './routes/videos.js';
 import collectionRoutes from './routes/collections.js';
 import analyticsRoutes from './routes/analytics.js';
 import adminRoutes from './routes/admin.js';
+import megaRoutes from "./routes/megaRoutes.js";
+
+
+
 
 dotenv.config();
 
@@ -33,6 +37,7 @@ const limiter = rateLimit({
 });
 
 // Middleware
+
 app.use(cors({
     origin: [
         'https://seehere3.netlify.app',
@@ -61,7 +66,7 @@ app.use('/api/collections', collectionRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/upload', uploadRoutes);
-
+app.use("/api/mega", megaRoutes);
 // Health check básico
 app.get('/health', (req, res) => {
   res.json({ 
