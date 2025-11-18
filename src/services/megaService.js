@@ -1,4 +1,4 @@
-// megaService.js - VERSÃO CORRIGIDA E ROBUSTA
+// megaService.js - VERSÃO COM CREDENCIAIS DIRETAS NO CÓDIGO
 import { Storage } from 'megajs';
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -29,15 +29,13 @@ class MegaService {
       connectionTimeout: 45000
     };
 
-    // ✅ CORREÇÃO: Remove credenciais hardcoded
+    // ✅ CREDENCIAIS DIRETAS NO CÓDIGO
     this.credentials = {
-      email: process.env.MEGA_EMAIL,
-      password: process.env.MEGA_PASSWORD
+      email: 'xhanckin@gmail.com',
+      password: 'Xhackin@2025/500'
     };
 
-    if (!this.credentials.email || !this.credentials.password) {
-      console.error('❌ Credenciais MEGA não configuradas nas variáveis de ambiente');
-    }
+    console.log('🔑 Credenciais MEGA configuradas para:', this.credentials.email);
 
     this.connectionAttempts = 0;
     this.maxConnectionAttempts = 3;
@@ -45,6 +43,35 @@ class MegaService {
     // Configuração de fallback
     this.fallbackPriority = ['mega', 'mega-cmd'];
     this.currentMethod = 'mega';
+    
+    // Conectar automaticamente na inicialização
+    this.initializeConnection();
+  }
+
+  // ✅ NOVO MÉTODO: Inicialização automática
+  async initializeConnection() {
+    try {
+      console.log('🚀 Inicializando conexão MEGA automaticamente...');
+      await this.connectMega();
+    } catch (error) {
+      console.warn('⚠️ Conexão automática falhou, mas o serviço continuará:', error.message);
+    }
+  }
+
+  // ✅ CORREÇÃO: Adicionar método ensureConnection que estava faltando
+  async ensureConnection() {
+    if (this.isConnected && this.storage) {
+      return true;
+    }
+
+    console.log('🔄 Garantindo conexão MEGA...');
+    try {
+      await this.connectMega();
+      return this.isConnected;
+    } catch (error) {
+      console.error('❌ Falha ao garantir conexão:', error);
+      return false;
+    }
   }
 
   // ========== SISTEMA DE FALLBACK AUTOMÁTICO ==========
@@ -112,7 +139,6 @@ class MegaService {
         lastError = error;
         console.warn(`⚠️ Tentativa ${attempt}/${this.rateLimit.maxRetries} falhou:`, error.message);
         
-        // ✅ CORREÇÃO: Melhor detecção de bloqueio
         if (this.isAccountBlockedError(error)) {
           this.isBlocked = true;
           console.error('🚫 Conta MEGA bloqueada. Aguarde algumas horas.');
@@ -153,9 +179,7 @@ class MegaService {
       try {
         console.log(`🔗 Tentativa ${this.connectionAttempts}/${this.maxConnectionAttempts} - Conectando ao MEGA.nz...`);
         
-        if (!this.credentials.email || !this.credentials.password) {
-          throw new Error('Credenciais MEGA não configuradas nas variáveis de ambiente');
-        }
+        console.log('📧 Usando email:', this.credentials.email);
 
         if (this.storage) {
           try {
@@ -185,7 +209,6 @@ class MegaService {
             this.connectionAttempts = 0;
             console.log('✅ Conectado ao MEGA.nz com sucesso!');
             
-            // ✅ CORREÇÃO: Storage info de forma correta
             this.updateStorageInfo().then(resolve).catch(resolve);
           };
 
@@ -251,7 +274,6 @@ class MegaService {
       await this.connectMega();
     } else {
       try {
-        // ✅ CORREÇÃO: Verificação de conexão mais robusta
         await this.storage.reloadAccountData();
       } catch (error) {
         console.warn('⚠️ Conexão MEGA pode estar inativa, reconectando...');
@@ -307,13 +329,9 @@ class MegaService {
     const files = [];
     
     for (const line of lines) {
-      // Suporta múltiplos formatos de output do MEGA-CMD
       const patterns = [
-        // Formato: [RW]  135.7 MB 2024-01-15T10:30:45 video.mp4
         /^\[.*\]\s+([\d.]+)\s+(\w+)\s+([\dT:-]+)\s+(.+)$/,
-        // Formato: -rw-r--r--  135.7 MB 2024-01-15T10:30:45 video.mp4  
         /^-\S+\s+([\d.]+)\s+(\w+)\s+([\dT:-]+)\s+(.+)$/,
-        // Formato básico: 135.7 MB video.mp4
         /^([\d.]+)\s+(\w+)\s+(.+)$/
       ];
       
@@ -326,11 +344,8 @@ class MegaService {
       if (match) {
         const size = parseFloat(match[1]);
         const unit = match[2];
-        const name = match[match.length - 1]; // Último grupo é sempre o nome
-        
-        // Se não tem timestamp, usa agora
+        const name = match[match.length - 1];
         const timestamp = match[3] ? new Date(match[3]).getTime() : Date.now();
-        
         const sizeInBytes = this.convertToBytes(size, unit);
         
         files.push({
@@ -366,7 +381,6 @@ class MegaService {
     try {
       await accessAsync(filePath);
       
-      // ✅ CORREÇÃO: Escapa paths corretamente para shell
       const escapedFilePath = this.escapeShellArg(filePath);
       const escapedRemotePath = this.escapeShellArg(remotePath);
       
@@ -404,10 +418,8 @@ class MegaService {
         
         const allVideoFiles = [];
         
-        // ✅ CORREÇÃO: Listagem correta com megajs
         const traverseFolder = async (folder, currentPath = '') => {
           try {
-            // Recarrega os filhos do folder
             await folder.reload();
             const children = Array.isArray(folder.children) ? folder.children : [];
             
@@ -451,6 +463,60 @@ class MegaService {
     });
   }
 
+  // ✅ NOVO: Método específico para listAllVideoFilesRecursive (usado no admin.js)
+  async listAllVideoFilesRecursive() {
+    return await this.listAllVideoFiles();
+  }
+
+  // ✅ NOVO: Método específico para listVideosInFolder (usado no admin.js)
+  async listVideosInFolder(folderPath = 'Mega/seehere-videos') {
+    try {
+      const allVideos = await this.listAllVideoFiles();
+      return allVideos.filter(video => 
+        video.path.includes(folderPath) || folderPath === ''
+      );
+    } catch (error) {
+      console.error('Erro ao listar vídeos na pasta:', error);
+      return [];
+    }
+  }
+
+  // ✅ NOVO: Método específico para getFileDownloadLink (usado no admin.js)
+  async getFileDownloadLink(fileId) {
+    return this.executeWithFallback('downloadFile', async (method) => {
+      if (method === 'mega') {
+        await this.ensureMegaConnection();
+        
+        const findFileById = (node, targetId) => {
+          if (!node.children) return null;
+          
+          for (const child of node.children) {
+            if (child.downloadId === targetId) {
+              return child;
+            }
+            if (child.directory) {
+              const found = findFileById(child, targetId);
+              if (found) return found;
+            }
+          }
+          return null;
+        };
+        
+        const file = findFileById(this.storage.root, fileId);
+        if (!file) {
+          throw new Error('Arquivo não encontrado no MEGA');
+        }
+        
+        const downloadUrl = await this.generatePublicLink(file);
+        return downloadUrl;
+        
+      } else if (method === 'mega-cmd') {
+        // Fallback para MEGA-CMD
+        throw new Error('Download por fileId não suportado via MEGA-CMD');
+      }
+    });
+  }
+
   async uploadFile(filePath, fileName, options = {}) {
     return this.executeWithFallback('uploadFile', async (method) => {
       if (method === 'mega') {
@@ -462,7 +528,6 @@ class MegaService {
         const stats = await statAsync(filePath);
         console.log(`📊 Tamanho do arquivo: ${this.formatBytes(stats.size)}`);
         
-        // ✅ CORREÇÃO: Upload via stream para arquivos grandes
         return new Promise((resolve, reject) => {
           const uploadStream = fs.createReadStream(filePath);
           
@@ -548,7 +613,6 @@ class MegaService {
       if (method === 'mega') {
         await this.ensureMegaConnection();
 
-        // ✅ CORREÇÃO: Obter storage info de forma correta
         await this.updateStorageInfo();
         
         return {
@@ -716,6 +780,17 @@ class MegaService {
   setFallbackPriority(priority) {
     this.fallbackPriority = priority;
     console.log(`🎯 Ordem de fallback atualizada: ${priority.join(' → ')}`);
+  }
+
+  // ✅ NOVO: Método para verificar status rápido
+  getStatus() {
+    return {
+      isConnected: this.isConnected,
+      isBlocked: this.isBlocked,
+      account: this.credentials.email,
+      currentMethod: this.currentMethod,
+      connectionAttempts: this.connectionAttempts
+    };
   }
 }
 
