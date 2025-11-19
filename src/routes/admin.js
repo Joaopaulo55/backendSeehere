@@ -1,4 +1,4 @@
-// admin.js - VERSÃO COMPLETAMENTE CORRIGIDA COM NOVAS ROTAS
+// admin.js - VERSÃO ATUALIZADA SEM UPLOAD E COM SCAN MEGA
 import express from 'express';
 import { prisma } from '../lib/prisma.js';
 import { authenticateToken, requireAdmin } from '../middleware/auth.js';
@@ -213,65 +213,49 @@ router.post('/import-mega-video', async (req, res) => {
   }
 });
 
-// Create video
-router.post('/videos', async (req, res) => {
+// ✅ NOVA ROTA: Scan de pasta MEGA
+router.post('/scan-mega-folder', async (req, res) => {
   try {
-    const {
-      title,
-      description,
-      tags,
-      megaFileId,
-      megaFileUrl,
-      urlStream,
-      urlDownload,
-      thumbnailUrl,
-      durationSeconds,
-      collections
-    } = req.body;
+    const { folderUrl } = req.body;
 
-    const video = await prisma.video.create({
-      data: {
-        title,
-        description,
-        tags: tags || [],
-        megaFileId,
-        megaFileUrl,
-        urlStream: urlStream || megaFileUrl,
-        urlDownload: urlDownload || megaFileUrl,
-        thumbnailUrl,
-        durationSeconds: parseInt(durationSeconds),
-        ownerId: req.user.id,
-        isPublished: true,
-        metadata: {}
-      },
-      include: {
-        owner: {
-          select: { displayName: true }
-        }
-      }
-    });
-
-    // Add to collections if specified
-    if (collections && collections.length > 0) {
-      await Promise.all(
-        collections.map((collectionId, index) =>
-          prisma.collectionVideo.create({
-            data: {
-              collectionId,
-              videoId: video.id,
-              position: index
-            }
-          })
-        )
-      );
+    if (!folderUrl) {
+      return res.status(400).json({
+        success: false,
+        error: 'URL da pasta MEGA é obrigatória'
+      });
     }
 
-    res.status(201).json({ success: true, video });
+    console.log('🔍 Scan de pasta MEGA solicitado:', folderUrl);
+
+    // Fazer requisição para o serviço de scan MEGA
+    const response = await fetch(`${process.env.API_BASE || 'http://localhost:3000'}/api/mega/scan-folder`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${req.headers.authorization?.split(' ')[1]}`
+      },
+      body: JSON.stringify({ folderUrl })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || 'Falha no scan da pasta');
+    }
+
+    res.json(data);
+
   } catch (error) {
-    console.error('Error creating video:', error);
-    res.status(500).json({ success: false, error: 'Failed to create video' });
+    console.error('❌ Erro no scan da pasta MEGA:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Falha ao escanear pasta MEGA'
+    });
   }
 });
+
+// ❌ REMOVIDA: Rota de criação de vídeo (upload)
+// router.post('/videos', async (req, res) => { ... });
 
 // Get all videos for admin
 router.get('/videos', async (req, res) => {
