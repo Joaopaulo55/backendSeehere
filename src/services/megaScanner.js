@@ -1,4 +1,3 @@
-// services/megaScanner.js
 import fetch from 'node-fetch';
 
 export class MegaScanner {
@@ -10,14 +9,12 @@ export class MegaScanner {
     try {
       console.log('🔍 Iniciando scan da pasta MEGA:', folderUrl);
       
-      // Extrair ID e chave da URL
       const { folderId, folderKey } = this.parseMegaUrl(folderUrl);
       
       if (!folderId || !folderKey) {
         throw new Error('URL do MEGA inválida. Formato esperado: https://mega.nz/folder/ID#CHAVE');
       }
 
-      // Fazer request para API do MEGA
       const files = await this.fetchFolderContents(folderId, folderKey);
       
       console.log(`✅ Encontrados ${files.length} arquivos na pasta`);
@@ -31,9 +28,6 @@ export class MegaScanner {
 
   parseMegaUrl(url) {
     try {
-      // Suporta formatos:
-      // https://mega.nz/folder/ID#CHAVE
-      // https://mega.nz/folder/ID#CHAVE/outra-coisa
       const match = url.match(/mega\.nz\/folder\/([^#\s]+)#([^\/\s]*)/);
       
       if (!match) {
@@ -106,7 +100,7 @@ export class MegaScanner {
               formattedSize: this.formatBytes(fileSize),
               downloadId: fileId,
               downloadUrl: downloadUrl,
-              timestamp: file.ts * 1000, // Converter para milliseconds
+              timestamp: file.ts * 1000,
               type: 'file',
               path: '/'
             });
@@ -122,7 +116,6 @@ export class MegaScanner {
 
   decryptAttribute(attributes, key) {
     try {
-      // Simples decodificação - em produção usar biblioteca apropriada
       if (typeof attributes === 'string') {
         return attributes;
       }
@@ -162,4 +155,3 @@ export class MegaScanner {
 }
 
 export const megaScanner = new MegaScanner();
-
