@@ -1,4 +1,3 @@
-// auth.js - MIDDLEWARE CORRIGIDO
 import jwt from 'jsonwebtoken';
 import { prisma } from '../lib/prisma.js';
 
@@ -7,7 +6,10 @@ export const authenticateToken = async (req, res, next) => {
   const token = authHeader && authHeader.split(' ')[1];
 
   if (!token) {
-    return res.status(401).json({ error: 'Access token required' });
+    return res.status(401).json({ 
+      success: false,
+      error: 'Token de acesso necessário' 
+    });
   }
 
   try {
@@ -21,55 +23,83 @@ export const authenticateToken = async (req, res, next) => {
         displayName: true, 
         role: true,
         avatarUrl: true,
-        isActive: true // ✅ ADICIONADO
+        isActive: true,
+        isVerified: true
       }
     });
 
     if (!user) {
-      return res.status(401).json({ error: 'User not found' });
+      return res.status(401).json({ 
+        success: false,
+        error: 'Usuário não encontrado' 
+      });
     }
 
-    // ✅ VERIFICAÇÃO CORRIGIDA: Permitir login mesmo se isActive for false/null
-    if (user.isActive === false) {
-      console.log('⚠️ Usuário desativado tentando acessar:', user.email);
-      // Não bloqueamos aqui, apenas registramos
+    if (!user.isActive) {
+      return res.status(403).json({ 
+        success: false,
+        error: 'Conta desativada' 
+      });
     }
 
     req.user = user;
     next();
   } catch (error) {
-    console.error('Token verification error:', error.message);
+    console.error('Erro na verificação do token:', error.message);
     
     if (error.name === 'TokenExpiredError') {
-      return res.status(401).json({ error: 'Token expired' });
+      return res.status(401).json({ 
+        success: false,
+        error: 'Token expirado' 
+      });
     }
     
     if (error.name === 'JsonWebTokenError') {
-      return res.status(403).json({ error: 'Invalid token' });
+      return res.status(403).json({ 
+        success: false,
+        error: 'Token inválido' 
+      });
     }
     
-    return res.status(403).json({ error: 'Token verification failed' });
+    return res.status(403).json({ 
+      success: false,
+      error: 'Falha na verificação do token' 
+    });
   }
 };
 
 export const requireAdmin = (req, res, next) => {
   if (!req.user) {
-    return res.status(401).json({ error: 'Authentication required' });
+    return res.status(401).json({ 
+      success: false,
+      error: 'Autenticação necessária' 
+    });
   }
   
-  // ✅ CORREÇÃO: Verificar se usuário está ativo
-  if (req.user.isActive === false) {
+  if (req.user.role !== 'ADMIN') {
     return res.status(403).json({ 
-      error: 'Account deactivated',
+      success: false,
+      error: 'Acesso de administrador necessário',
       userRole: req.user.role
     });
   }
   
-  if (req.user.role !== 'ADMIN' && req.user.role !== 'EDITOR') {
+  next();
+};
+
+export const requireEditor = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ 
+      success: false,
+      error: 'Autenticação necessária' 
+    });
+  }
+  
+  if (!['ADMIN', 'EDITOR'].includes(req.user.role)) {
     return res.status(403).json({ 
-      error: 'Admin access required',
-      userRole: req.user.role,
-      requiredRoles: ['ADMIN', 'EDITOR']
+      success: false,
+      error: 'Acesso de editor necessário',
+      userRole: req.user.role
     });
   }
   

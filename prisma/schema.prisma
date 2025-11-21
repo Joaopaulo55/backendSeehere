@@ -8,15 +8,18 @@ datasource db {
 }
 
 model User {
-  id           String    @id @default(uuid())
-  email        String    @unique
-  passwordHash String
-  displayName  String?
-  avatarUrl    String?
-  role         UserRole  @default(USER)
-  preferences  Json?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  id            String   @id @default(uuid())
+  email         String   @unique
+  passwordHash  String
+  displayName   String?
+  avatarUrl     String?
+  role          UserRole  @default(USER)
+  isActive      Boolean   @default(true)      // ✅ ADICIONADO: Para desativar usuários
+  isVerified    Boolean   @default(false)     // ✅ ADICIONADO: Verificação de email
+  lastLogin     DateTime? // ✅ ADICIONADO: Último acesso
+  preferences   Json?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   videos       Video[]
   collections  Collection[]
@@ -33,7 +36,7 @@ model User {
 model Video {
   id               String   @id @default(uuid())
   ownerId          String
-  megaFileId       String?
+  megaFileId       String?  @unique // ✅ MELHORIA: Unique para evitar duplicatas
   megaFileUrl      String?
   urlStream        String?
   urlDownload      String?
@@ -41,7 +44,7 @@ model Video {
   description      String?
   tags             String[]
   thumbnailUrl     String?
-  durationSeconds  Int
+  durationSeconds  Int      @default(0)  // ✅ CORREÇÃO: Valor padrão
   viewsCount       Int      @default(0)
   likesCount       Int      @default(0)
   isPublished      Boolean  @default(false)
@@ -66,6 +69,7 @@ model Collection {
   thumbnailUrl String?
   createdById String
   isFeatured  Boolean  @default(false)
+  isPublic    Boolean  @default(true)  // ✅ ADICIONADO: Coleções públicas/privadas
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -110,6 +114,7 @@ model Comment {
   parentCommentId  String?
   body             String
   likesCount       Int      @default(0)
+  isApproved       Boolean  @default(true)  // ✅ ADICIONADO: Moderação de comentários
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -141,7 +146,7 @@ model Notification {
   userId    String
   type      NotificationType
   payload   Json
-  seen      Boolean  @default(false)
+  read      Boolean  @default(false)  // ✅ MELHORIA: 'read' em vez de 'seen' (padrão)
   createdAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -168,6 +173,7 @@ model WatchHistory {
   videoId        String
   lastPosition   Float    @default(0)
   watchedAt      DateTime @default(now())
+  progress       Float    @default(0)  // ✅ ADICIONADO: Progresso em porcentagem
 
   user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
   video Video @relation(fields: [videoId], references: [id], onDelete: Cascade)
@@ -188,10 +194,15 @@ enum VideoEventType {
   SEEK
   TIMEUPDATE
   ENDED
+  BUFFER
+  ERROR
 }
 
 enum NotificationType {
   REPLY
   NEW_VIDEO
   SYSTEM
+  LIKE
+  COMMENT
+  FOLLOW
 }
