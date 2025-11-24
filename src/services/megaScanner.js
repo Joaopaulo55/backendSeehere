@@ -1,5 +1,6 @@
 // megaScanner.js
-import mega from 'megajs';
+import * as mega from 'megajs';
+
 
 export class MegaScanner {
   constructor() {
