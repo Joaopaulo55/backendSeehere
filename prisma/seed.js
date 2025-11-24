@@ -1,4 +1,4 @@
-// scripts/seed.js
+// prisma/seed.js
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import dotenv from 'dotenv';

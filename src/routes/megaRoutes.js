@@ -29,11 +29,19 @@ router.post('/scan-folder', authenticateToken, requireAdmin, async (req, res) =>
     
     const dbFileIds = dbVideos.map(video => video.megaFileId);
     
-    const filesWithStatus = files.map(file => ({
-      ...file,
-      isInDatabase: dbFileIds.includes(file.downloadId),
-      existingTitle: dbVideos.find(v => v.megaFileId === file.downloadId)?.title || null
-    }));
+    // ✅ Lógica robusta de comparação
+    const filesWithStatus = files.map(file => {
+      // prioriza downloadId -> se não existir, usa downloadUrl
+      const fileId = file.downloadId || file.downloadUrl || null;
+      const isInDatabase = fileId ? dbFileIds.includes(fileId) : false;
+      const existingVideo = dbVideos.find(v => v.megaFileId === fileId);
+      
+      return {
+        ...file,
+        isInDatabase,
+        existingTitle: existingVideo?.title || null
+      };
+    });
 
     const notInDatabase = filesWithStatus.filter(file => !file.isInDatabase);
     const alreadyInDatabase = filesWithStatus.filter(file => file.isInDatabase);
@@ -104,7 +112,7 @@ router.post('/import-video', authenticateToken, requireAdmin, async (req, res) =
       megaFileUrl: downloadUrl,
       urlStream: downloadUrl, // Pode ser otimizado depois
       urlDownload: downloadUrl,
-      thumbnailUrl: thumbnailUrl || this.generateDefaultThumbnail(title),
+      thumbnailUrl: thumbnailUrl || generateDefaultThumbnail(title),
       durationSeconds: 0,
       ownerId: req.user.id,
       isPublished: true,
